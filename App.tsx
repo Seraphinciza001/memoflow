@@ -1,34 +1,64 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   StyleSheet,
-  Text,
   View,
-  TextInput,
-  TouchableOpacity,
-  FlatList,
-  useColorScheme,
-  StatusBar,
-  SafeAreaView,
-  Alert,
-  Modal,
+  Text,
   ScrollView,
-  KeyboardAvoidingView,
+  SafeAreaView,
+  StatusBar,
+  useColorScheme,
   Platform,
-  Animated,
+  Alert,
+  TouchableOpacity,
 } from 'react-native';
 import * as Notifications from 'expo-notifications';
 import * as TaskManager from 'expo-task-manager';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { DECORATIONS, transformToStylishFont, FontStyleType } from './decorations';
+import {
+  NoteItem,
+  DrawerTab,
+  NoteColor,
+  ThemeMode,
+  AppSettings,
+  JsonDatabase,
+} from './src/types';
+import {
+  loadNotes,
+  saveNotes,
+  loadSettings,
+  saveSettings,
+  getInitialSeedNotes,
+} from './src/utils/storage';
+import {
+  getActiveSmartAlerts,
+  addMinutesToTime,
+} from './src/utils/time';
+import { TopBar } from './src/components/TopBar';
+import { Drawer } from './src/components/Drawer';
+import { SmartAlertBanner } from './src/components/SmartAlertBanner';
+import { NoteCard } from './src/components/NoteCard';
+import { FloatingActionButton } from './src/components/FloatingActionButton';
+import { NoteEditorModal } from './src/components/NoteEditorModal';
+import { NewListTitleModal } from './src/components/NewListTitleModal';
+import { JsonDatabaseModal } from './src/components/JsonDatabaseModal';
+import { DeleteConfirmModal } from './src/components/DeleteConfirmModal';
+import {
+  Pin,
+  Trash2,
+  Clock,
+  Archive,
+  Inbox,
+  StickyNote,
+  CheckSquare,
+} from './src/SVG';
 
-// 1. Définition de la tâche d'arrière-plan pour recevoir les notifications même si l'app est fermée
+// 1. Définition de la tâche d'arrière-plan pour recevoir les notifications même si l'application est fermée
 const BACKGROUND_NOTIFICATION_TASK = 'BACKGROUND_NOTIFICATION_TASK';
-TaskManager.defineTask(BACKGROUND_NOTIFICATION_TASK, ({ data, error, executionInfo }) => {
+TaskManager.defineTask(BACKGROUND_NOTIFICATION_TASK, async ({ data, error, executionInfo }) => {
   if (error) {
     console.error('Erreur tâche de fond notification:', error);
     return;
   }
-  console.log('Notification déclenchée en tâche de fond:', data, executionInfo);
+  console.log('Notification tâche de fond déclenchée:', data, executionInfo);
 });
 
 // 2. Configuration du comportement des notifications au premier plan
@@ -40,107 +70,48 @@ Notifications.setNotificationHandler({
   }),
 });
 
-interface TodoSubItem {
-  id: string;
-  text: string;
-  completed: boolean;
-  isUrgent?: boolean;
-}
-
-interface NoteItem {
-  id: string;
-  title: string;
-  content: string;
-  type: 'note' | 'list';
-  todos: TodoSubItem[];
-  color: string;
-  isPinned: boolean;
-  isUrgent?: boolean;
-  priority: 'low' | 'medium' | 'high';
-  reminderTime?: string; // Format ISO ou minutes
-  notificationId?: string;
-  urgentNotificationId?: string;
-  createdAt: string;
-  updatedAt: string;
-}
-
-const STORAGE_KEY = '@seraphin_agenda_notes_v1';
-
-// Composant avec animation d'entrée (fade-in + glissement fluide vers le haut)
-const AnimatedCard = ({
-  children,
-  index,
-  style,
-}: {
-  children: React.ReactNode;
-  index: number;
-  style?: any;
-}) => {
-  const fadeAnim = useRef(new Animated.Value(0)).current;
-  const slideAnim = useRef(new Animated.Value(20)).current;
-
-  useEffect(() => {
-    Animated.parallel([
-      Animated.timing(fadeAnim, {
-        toValue: 1,
-        duration: 380,
-        delay: Math.min(index * 50, 300),
-        useNativeDriver: true,
-      }),
-      Animated.timing(slideAnim, {
-        toValue: 0,
-        duration: 380,
-        delay: Math.min(index * 50, 300),
-        useNativeDriver: true,
-      }),
-    ]).start();
-  }, []);
-
-  return (
-    <Animated.View
-      style={[
-        style,
-        {
-          opacity: fadeAnim,
-          transform: [{ translateY: slideAnim }],
-        },
-      ]}
-    >
-      {children}
-    </Animated.View>
-  );
-};
-
 export default function App() {
   const systemColorScheme = useColorScheme();
-  const [manualTheme, setManualTheme] = useState<'system' | 'light' | 'dark'>('system');
-  const isDark = manualTheme === 'system' ? systemColorScheme === 'dark' : manualTheme === 'dark';
-
   const [notes, setNotes] = useState<NoteItem[]>([]);
+  const [settings, setSettings] = useState<AppSettings>({
+    theme: 'light',
+    viewMode: 'grid',
+    enableAlertSounds: true,
+    autoSaveInterval: 1,
+  });
+  const [theme, setTheme] = useState<ThemeMode>('light');
+  const [isDrawerOpen, setIsDrawerOpen] = useState(false);
+  const [activeTab, setActiveTab] = useState<DrawerTab>('notes');
   const [searchQuery, setSearchQuery] = useState('');
-  const [activeFilter, setActiveFilter] = useState<'all' | 'list' | 'note'>('all');
+  const [filterType, setFilterType] = useState<'all' | 'note' | 'list'>('all');
 
-  // Modal State
-  const [isModalOpen, setIsModalOpen] = useState(false);
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [newTitle, setNewTitle] = useState('');
-  const [newContent, setNewContent] = useState('');
-  const [itemType, setItemType] = useState<'note' | 'list'>('list');
-  const [subTasks, setSubTasks] = useState<{ text: string; isUrgent: boolean }[]>([
-    { text: '', isUrgent: false },
-  ]);
-  const [reminderMinutes, setReminderMinutes] = useState<number | null>(15);
-  const [isNoteUrgent, setIsNoteUrgent] = useState(false);
-  const [priority, setPriority] = useState<'low' | 'medium' | 'high'>('medium');
+  // Modals state
+  const [editingNote, setEditingNote] = useState<NoteItem | null>(null);
+  const [isNewListModalOpen, setIsNewListModalOpen] = useState(false);
+  const [isJsonDbModalOpen, setIsJsonDbModalOpen] = useState(false);
 
-  // Modal Décors & Polices
-  const [isDecorModalOpen, setIsDecorModalOpen] = useState(false);
-  const [decorTarget, setDecorTarget] = useState<'title' | 'content'>('title');
+  // Delete Confirmation Modal state
+  const [deleteConfirmState, setDeleteConfirmState] = useState<{
+    isOpen: boolean;
+    title: string;
+    message: string;
+    confirmAction: () => void;
+  }>({
+    isOpen: false,
+    title: '',
+    message: '',
+    confirmAction: () => {},
+  });
 
-  // Initialisation et permissions Android
+  // Ticker timestamp to re-evaluate alerts and reminders periodically
+  const [ticker, setTicker] = useState(Date.now());
+
+  const isDark = theme === 'system' ? systemColorScheme === 'dark' : theme === 'dark';
+
+  // Initialisation Android notifications & chargement storage
   useEffect(() => {
     (async () => {
-      // Configurer les permissions de notification
+      // Permissions notifications
       try {
         const { status: existingStatus } = await Notifications.getPermissionsAsync();
         let finalStatus = existingStatus;
@@ -149,14 +120,6 @@ export default function App() {
           finalStatus = status;
         }
 
-        if (finalStatus !== 'granted') {
-          Alert.alert(
-            'Notifications désactivées',
-            'Pour recevoir les rappels de vos tâches même quand l\'application est fermée, autorisez les notifications dans les paramètres Android.'
-          );
-        }
-
-        // Configuration du canal haute priorité Android (Alarme + Son + Vibreur)
         if (Platform.OS === 'android') {
           await Notifications.setNotificationChannelAsync('agenda-seraphin-channel', {
             name: 'Rappels & Alarmes Agenda',
@@ -170,1160 +133,977 @@ export default function App() {
           });
         }
 
-        // Enregistrer la tâche de fond
         const isRegistered = await TaskManager.isTaskRegisteredAsync(BACKGROUND_NOTIFICATION_TASK);
         if (!isRegistered) {
           await Notifications.registerTaskAsync(BACKGROUND_NOTIFICATION_TASK);
         }
       } catch (err) {
-        console.warn('Erreur setup notifications:', err);
+        console.warn('Erreur setup notifications Android:', err);
       }
 
-      // Charger les données locales
+      // Chargement des données locales
       try {
-        const stored = await AsyncStorage.getItem(STORAGE_KEY);
-        if (stored) {
-          const parsed = JSON.parse(stored);
-          // Filtrer d'éventuelles notes obsolètes
-          const cleaned = parsed.filter(
-            (n: any) => !n.title?.toLowerCase().includes('carnet de bord')
-          );
-          setNotes(cleaned);
-        } else {
-          // Exemple initial propre
-          const defaultNotes: NoteItem[] = [
-            {
-              id: '1',
-              title: '⚡ Préparations Prioritaires',
-              content: 'Tâches avec alertes configurées pour fonctionner même application fermée.',
-              type: 'list',
-              todos: [
-                { id: '1-1', text: 'Tester la notification 5 min pour tâche urgente', completed: false, isUrgent: true },
-                { id: '1-2', text: 'Vérifier l\'affichage en mode sombre', completed: true, isUrgent: false },
-                { id: '1-3', text: 'Compiler le fichier APK pour Android', completed: false, isUrgent: false },
-              ],
-              color: '#d97706',
-              isPinned: true,
-              isUrgent: true,
-              priority: 'high',
-              createdAt: new Date().toISOString(),
-              updatedAt: new Date().toISOString(),
-            },
-          ];
-          setNotes(defaultNotes);
-          await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(defaultNotes));
-        }
-      } catch (err) {
-        console.error('Erreur chargement storage:', err);
+        const loaded = await loadNotes();
+        setNotes(loaded);
+        const savedSettings = await loadSettings();
+        setSettings(savedSettings);
+        if (savedSettings.theme) setTheme(savedSettings.theme);
+      } catch (e) {
+        console.error('Erreur chargement:', e);
       }
     })();
   }, []);
 
-  // Boucle de rappel automatique toutes les 5 minutes pour les tâches urgentes non terminées
+  // Periodic ticker for real-time task time tracking
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setTicker(Date.now());
+    }, 10000); // Check every 10 seconds
+    return () => clearInterval(interval);
+  }, []);
+
+  // Save to AsyncStorage whenever notes change
+  const handlePersistNotes = async (updated: NoteItem[]) => {
+    setNotes(updated);
+    await saveNotes(updated);
+  };
+
+  const handleToggleTheme = () => {
+    const nextTheme: ThemeMode = isDark ? 'light' : 'dark';
+    setTheme(nextTheme);
+    const nextSettings: AppSettings = { ...settings, theme: nextTheme };
+    setSettings(nextSettings);
+    saveSettings(nextSettings);
+  };
+
+  const handleResetToSeeds = () => {
+    const seeds = getInitialSeedNotes();
+    handlePersistNotes(seeds);
+  };
+
+  // Compute smart alerts across all active notes
+  const smartAlerts = useMemo(() => {
+    return getActiveSmartAlerts(notes);
+  }, [notes, ticker]);
+
+  // Urgent tasks recurring alarm every 5 minutes on Android
   useEffect(() => {
     const notifyUrgentTasks = async () => {
-      const urgentTasks: { text: string; listTitle: string }[] = [];
+      const urgentPending: { text: string; noteTitle: string }[] = [];
       notes.forEach((n) => {
-        n.todos.forEach((t) => {
-          if (t.isUrgent && !t.completed) {
-            urgentTasks.push({ text: t.text, listTitle: n.title });
-          }
-        });
+        if (!n.isDeleted && !n.isArchived && Array.isArray(n.tasks)) {
+          n.tasks.forEach((t) => {
+            if (t.isUrgent && !t.completed) {
+              urgentPending.push({ text: t.text, noteTitle: n.title || 'Liste' });
+            }
+          });
+        }
       });
 
-      if (urgentTasks.length > 0) {
+      if (urgentPending.length > 0) {
         try {
-          const first = urgentTasks[0];
-          const extra = urgentTasks.length > 1 ? ` (+${urgentTasks.length - 1} autre(s))` : '';
+          const first = urgentPending[0];
+          const extra = urgentPending.length > 1 ? ` (+${urgentPending.length - 1} autre(s))` : '';
           await Notifications.scheduleNotificationAsync({
             content: {
               title: '⚡ TÂCHE URGENTE (Rappel 5 min)',
-              body: `« ${first.text} » (${first.listTitle})${extra}\nÀ faire rapidement !`,
+              body: `« ${first.text} » (${first.noteTitle})${extra}\nÀ faire rapidement !`,
               sound: true,
               priority: Notifications.AndroidNotificationPriority.MAX,
               channelId: 'agenda-seraphin-channel',
-            },
-            trigger: null, // Déclenchement immédiat du ticker
+            } as any,
+            trigger: null,
           });
         } catch (e) {
-          console.warn('Erreur alerte urgente 5 min:', e);
+          console.warn('Erreur notification urgente:', e);
         }
       }
     };
 
-    // Intervalle de 5 minutes (300 000 ms)
     const intervalId = setInterval(notifyUrgentTasks, 5 * 60 * 1000);
     return () => clearInterval(intervalId);
   }, [notes]);
 
-  const saveNotes = async (updated: NoteItem[]) => {
-    setNotes(updated);
-    try {
-      await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
-    } catch (e) {
-      console.error('Erreur sauvegarde:', e);
-    }
-  };
+  // Filter and search notes
+  const filteredNotes = useMemo(() => {
+    return notes.filter((n) => {
+      // Tab filter
+      if (activeTab === 'notes') {
+        if (n.isDeleted || n.isArchived) return false;
+      } else if (activeTab === 'reminders') {
+        if (n.isDeleted || n.isArchived) return false;
+        const hasReminders = n.tasks?.some((t) => Boolean(t.reminderTime));
+        if (!hasReminders) return false;
+      } else if (activeTab === 'archive') {
+        if (n.isDeleted || !n.isArchived) return false;
+      } else if (activeTab === 'trash') {
+        if (!n.isDeleted) return false;
+      }
 
-  // Planification d'une alerte standard avec Exact Alarm Android
-  const scheduleTaskReminder = async (title: string, minutes: number): Promise<string> => {
-    const triggerSeconds = minutes * 60;
-    const notificationId = await Notifications.scheduleNotificationAsync({
-      content: {
-        title: '⏰ Rappel Agenda',
-        body: `Rappel : ${title}`,
-        data: { title, minutes },
-        sound: true,
-        channelId: 'agenda-seraphin-channel',
-        priority: Notifications.AndroidNotificationPriority.HIGH,
-      },
-      trigger: {
-        seconds: triggerSeconds,
-      },
+      // Type filter
+      if (filterType !== 'all' && n.type !== filterType) {
+        return false;
+      }
+
+      // Search query filter
+      if (searchQuery.trim()) {
+        const q = searchQuery.toLowerCase();
+        const matchTitle = (n.title || '').toLowerCase().includes(q);
+        const matchContent = (n.content || '').toLowerCase().includes(q);
+        const matchTasks = n.tasks?.some((t) => t.text.toLowerCase().includes(q));
+        return matchTitle || matchContent || matchTasks;
+      }
+
+      return true;
     });
-    return notificationId;
-  };
+  }, [notes, activeTab, filterType, searchQuery]);
 
-  // Planification d'un rappel récurrent toutes les 5 minutes pour les éléments urgents
-  const scheduleUrgentRecurringNotification = async (title: string): Promise<string> => {
-    const notificationId = await Notifications.scheduleNotificationAsync({
-      content: {
-        title: '⚡ TÂCHE URGENTE (Rappel récurrent 5 min)',
-        body: `« ${title} » requiert votre action !`,
-        sound: true,
-        channelId: 'agenda-seraphin-channel',
-        priority: Notifications.AndroidNotificationPriority.MAX,
-      },
-      trigger: {
-        seconds: 300, // 5 minutes
-        repeats: true,
-      },
-    });
-    return notificationId;
-  };
+  // Split into pinned and others
+  const pinnedNotes = useMemo(
+    () => filteredNotes.filter((n) => n.isPinned),
+    [filteredNotes]
+  );
+  const otherNotes = useMemo(
+    () => filteredNotes.filter((n) => !n.isPinned),
+    [filteredNotes]
+  );
 
-  // Réinitialisation de la base de données
-  const handleResetDatabase = () => {
-    Alert.alert(
-      'Réinitialiser la base de données ?',
-      'Toutes les listes, notes et rappels enregistrés seront remis à zéro.',
-      [
-        { text: 'Annuler', style: 'cancel' },
-        {
-          text: 'Réinitialiser',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              await Notifications.cancelAllScheduledNotificationsAsync();
-              await AsyncStorage.removeItem(STORAGE_KEY);
-              setNotes([]);
-              Alert.alert('Réinitialisation terminée', 'La base de données a été vidée.');
-            } catch (err) {
-              console.error('Erreur reset database:', err);
-            }
-          },
-        },
-      ]
+  // Actions
+  const handleTogglePin = (noteId: string) => {
+    const updated = notes.map((n) =>
+      n.id === noteId ? { ...n, isPinned: !n.isPinned } : n
     );
+    handlePersistNotes(updated);
   };
 
-  const handleSaveItem = async () => {
-    if (!newTitle.trim()) {
-      Alert.alert('Erreur', 'Veuillez saisir un titre pour votre liste ou note.');
-      return;
-    }
+  const handleToggleReadOnly = (noteId: string) => {
+    const updated = notes.map((n) =>
+      n.id === noteId ? { ...n, isReadOnly: !n.isReadOnly } : n
+    );
+    handlePersistNotes(updated);
+  };
 
-    let notifId: string | undefined;
-    if (reminderMinutes && reminderMinutes > 0) {
-      try {
-        notifId = await scheduleTaskReminder(newTitle.trim(), reminderMinutes);
-      } catch (err) {
-        console.warn('Erreur programmation alarme:', err);
-      }
-    }
-
-    let urgentNotifId: string | undefined;
-    const hasUrgentTasks = isNoteUrgent || subTasks.some((t) => t.isUrgent && t.text.trim().length > 0);
-    if (hasUrgentTasks) {
-      try {
-        urgentNotifId = await scheduleUrgentRecurringNotification(newTitle.trim());
-      } catch (err) {
-        console.warn('Erreur programmation alarme urgente:', err);
-      }
-    }
-
-    const validTodos: TodoSubItem[] = subTasks
-      .filter((t) => t.text.trim().length > 0)
-      .map((t, index) => ({
-        id: `${Date.now()}-${index}`,
-        text: t.text.trim(),
-        completed: false,
-        isUrgent: t.isUrgent,
-      }));
-
-    if (editingId) {
-      const updated = notes.map((item) => {
-        if (item.id === editingId) {
-          if (item.notificationId && notifId) {
-            Notifications.cancelScheduledNotificationAsync(item.notificationId);
-          }
-          if (item.urgentNotificationId && urgentNotifId) {
-            Notifications.cancelScheduledNotificationAsync(item.urgentNotificationId);
-          }
+  const handleToggleTask = (noteId: string, taskId: string) => {
+    const updated = notes.map((n) => {
+      if (n.id !== noteId) return n;
+      const nextTasks = (n.tasks || []).map((t) => {
+        if (t.id === taskId) {
+          const nextCompleted = !t.completed;
           return {
-            ...item,
-            title: newTitle.trim(),
-            content: newContent.trim(),
-            type: itemType,
-            todos: validTodos.length > 0 ? validTodos : item.todos,
-            isUrgent: hasUrgentTasks,
-            priority,
-            notificationId: notifId || item.notificationId,
-            urgentNotificationId: urgentNotifId || item.urgentNotificationId,
-            reminderTime: reminderMinutes ? `Dans ${reminderMinutes} min` : item.reminderTime,
-            updatedAt: new Date().toISOString(),
+            ...t,
+            completed: nextCompleted,
+            completedAt: nextCompleted ? Date.now() : undefined,
           };
         }
-        return item;
+        return t;
       });
-      await saveNotes(updated);
-    } else {
-      const newItem: NoteItem = {
-        id: Date.now().toString(),
-        title: newTitle.trim(),
-        content: newContent.trim(),
-        type: itemType,
-        todos: validTodos,
-        color: '#d97706',
-        isPinned: false,
-        isUrgent: hasUrgentTasks,
-        priority,
-        notificationId: notifId,
-        urgentNotificationId: urgentNotifId,
-        reminderTime: reminderMinutes ? `Dans ${reminderMinutes} min` : undefined,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      };
-      await saveNotes([newItem, ...notes]);
-    }
-
-    // Reset modal
-    setEditingId(null);
-    setNewTitle('');
-    setNewContent('');
-    setSubTasks([{ text: '', isUrgent: false }]);
-    setReminderMinutes(15);
-    setIsNoteUrgent(false);
-    setIsModalOpen(false);
-
-    if (hasUrgentTasks) {
-      Alert.alert(
-        '⚡ Alerte Urgente Activée',
-        'Cette tâche déclenchera un rappel toutes les 5 minutes jusqu\'à sa réalisation, même avec l\'application fermée.'
-      );
-    } else if (notifId) {
-      Alert.alert(
-        '🔔 Rappel programmé',
-        `Vous recevrez une alerte sonore et vibration dans ${reminderMinutes} minutes même si l'application est fermée.`
-      );
-    }
-  };
-
-  const handleToggleTodo = async (noteId: string, todoId: string) => {
-    const updated = notes.map((note) => {
-      if (note.id === noteId) {
-        const updatedTodos = note.todos.map((todo) => {
-          if (todo.id === todoId) {
-            return { ...todo, completed: !todo.completed };
-          }
-          return todo;
-        });
-        return { ...note, todos: updatedTodos };
-      }
-      return note;
+      return { ...n, tasks: nextTasks, updatedAt: Date.now() };
     });
-    await saveNotes(updated);
+    handlePersistNotes(updated);
   };
 
-  const handleDeleteNote = async (id: string) => {
-    const note = notes.find((n) => n.id === id);
-    if (note?.notificationId) {
-      await Notifications.cancelScheduledNotificationAsync(note.notificationId);
-    }
-    if (note?.urgentNotificationId) {
-      await Notifications.cancelScheduledNotificationAsync(note.urgentNotificationId);
-    }
-    const updated = notes.filter((n) => n.id !== id);
-    await saveNotes(updated);
+  const handleSnoozeTask = (noteId: string, taskId: string, minutes: number) => {
+    const updated = notes.map((n) => {
+      if (n.id !== noteId) return n;
+      const nextTasks = (n.tasks || []).map((t) => {
+        if (t.id === taskId) {
+          const nowTime = new Date().toLocaleTimeString('fr-FR', {
+            hour: '2-digit',
+            minute: '2-digit',
+          });
+          const baseTime = t.reminderTime || nowTime;
+          const newTime = addMinutesToTime(minutes, baseTime);
+          return {
+            ...t,
+            reminderTime: newTime,
+          };
+        }
+        return t;
+      });
+      return { ...n, tasks: nextTasks, updatedAt: Date.now() };
+    });
+    handlePersistNotes(updated);
   };
 
-  const handleApplyDecor = (template: string) => {
-    if (decorTarget === 'title') {
-      const current = newTitle.trim() || 'Titre';
-      const formatted = template.replace('Placeholder', current);
-      setNewTitle(formatted);
-    } else {
-      const current = newContent.trim() || 'Contenu';
-      const formatted = template.replace('Placeholder', current);
-      setNewContent(newContent ? `${newContent}\n${formatted}` : formatted);
-    }
-    setIsDecorModalOpen(false);
+  const handleChangeColor = (noteId: string, color: NoteColor) => {
+    const updated = notes.map((n) =>
+      n.id === noteId ? { ...n, color } : n
+    );
+    handlePersistNotes(updated);
   };
 
-  const handleApplyFontStyle = (style: FontStyleType) => {
-    if (decorTarget === 'title') {
-      if (newTitle.trim()) {
-        setNewTitle(transformToStylishFont(newTitle, style));
+  const handleArchive = (noteId: string) => {
+    const updated = notes.map((n) =>
+      n.id === noteId ? { ...n, isArchived: true, isPinned: false } : n
+    );
+    handlePersistNotes(updated);
+  };
+
+  const handleUnarchive = (noteId: string) => {
+    const updated = notes.map((n) =>
+      n.id === noteId ? { ...n, isArchived: false } : n
+    );
+    handlePersistNotes(updated);
+  };
+
+  const handleMoveToTrash = (noteId: string) => {
+    const updated = notes.map((n) =>
+      n.id === noteId
+        ? { ...n, isDeleted: true, isPinned: false, deletedAt: Date.now() }
+        : n
+    );
+    handlePersistNotes(updated);
+  };
+
+  const handleRestoreFromTrash = (noteId: string) => {
+    const updated = notes.map((n) =>
+      n.id === noteId ? { ...n, isDeleted: false } : n
+    );
+    handlePersistNotes(updated);
+  };
+
+  // Permanent delete confirmation
+  const handleRequestPermanentDelete = (note: NoteItem) => {
+    setDeleteConfirmState({
+      isOpen: true,
+      title: 'Supprimer définitivement',
+      message: `Êtes-vous sûr de vouloir supprimer définitivement « ${
+        note.title || 'cette note'
+      } » ? Cette action est irréversible.`,
+      confirmAction: () => {
+        const updated = notes.filter((n) => n.id !== note.id);
+        handlePersistNotes(updated);
+        setDeleteConfirmState((s) => ({ ...s, isOpen: false }));
+      },
+    });
+  };
+
+  // Empty entire trash confirmation
+  const handleRequestEmptyTrash = () => {
+    const trashCount = notes.filter((n) => n.isDeleted).length;
+    if (trashCount === 0) return;
+
+    setDeleteConfirmState({
+      isOpen: true,
+      title: 'Vider toute la corbeille',
+      message: `Êtes-vous certain de vouloir supprimer définitivement les ${trashCount} élément(s) de la corbeille ? Cette action est irréversible.`,
+      confirmAction: () => {
+        const updated = notes.filter((n) => !n.isDeleted);
+        handlePersistNotes(updated);
+        setDeleteConfirmState((s) => ({ ...s, isOpen: false }));
+      },
+    });
+  };
+
+  // Creation flows
+  const handleCreateNote = () => {
+    const newNote: NoteItem = {
+      id: `note-${Date.now()}`,
+      title: '',
+      type: 'note',
+      content: '',
+      tasks: [],
+      images: [],
+      color: 'default',
+      isPinned: false,
+      isReadOnly: false,
+      isArchived: false,
+      isDeleted: false,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+    handlePersistNotes([newNote, ...notes]);
+    setEditingNote(newNote);
+  };
+
+  const handleOpenCreateListDialog = () => {
+    setIsNewListModalOpen(true);
+  };
+
+  const handleCreateListWithTitle = (title: string) => {
+    setIsNewListModalOpen(false);
+    const newList: NoteItem = {
+      id: `list-${Date.now()}`,
+      title,
+      type: 'list',
+      content: '',
+      tasks: [
+        { id: `task-${Date.now()}-1`, text: 'Première tâche à accomplir', completed: false },
+      ],
+      images: [],
+      color: 'amber',
+      isPinned: false,
+      isReadOnly: false,
+      isArchived: false,
+      isDeleted: false,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+    handlePersistNotes([newList, ...notes]);
+    setEditingNote(newList);
+  };
+
+  const handleSaveEditedNote = (updated: NoteItem) => {
+    const newNotes = notes.map((n) => (n.id === updated.id ? updated : n));
+    handlePersistNotes(newNotes);
+    setEditingNote(null);
+  };
+
+  const handleOpenNoteFromAlert = (noteId: string) => {
+    const target = notes.find((n) => n.id === noteId);
+    if (target) {
+      setEditingNote(target);
+    }
+  };
+
+  const handleImportDatabase = (imported: JsonDatabase | NoteItem[]) => {
+    if (Array.isArray(imported)) {
+      handlePersistNotes(imported);
+    } else if (imported && Array.isArray(imported.notes)) {
+      handlePersistNotes(imported.notes);
+      if (imported.settings) {
+        setSettings(imported.settings);
+        if (imported.settings.theme) setTheme(imported.settings.theme);
+        saveSettings(imported.settings);
       }
-    } else {
-      if (newContent.trim()) {
-        setNewContent(transformToStylishFont(newContent, style));
-      }
     }
-    setIsDecorModalOpen(false);
   };
-
-  const filteredNotes = notes.filter((note) => {
-    if (activeFilter !== 'all' && note.type !== activeFilter) return false;
-    if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase();
-      const matchTitle = note.title.toLowerCase().includes(q);
-      const matchContent = note.content.toLowerCase().includes(q);
-      const matchTodos = note.todos.some((t) => t.text.toLowerCase().includes(q));
-      return matchTitle || matchContent || matchTodos;
-    }
-    return true;
-  });
-
-  const themeStyles = isDark ? darkTheme : lightTheme;
 
   return (
-    <SafeAreaView style={[styles.safeArea, themeStyles.background]}>
+    <SafeAreaView
+      style={[
+        styles.safeArea,
+        isDark ? styles.safeAreaDark : styles.safeAreaLight,
+      ]}
+    >
       <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} />
 
-      {/* Top Header */}
-      <View style={[styles.header, themeStyles.border]}>
-        <View>
-          <Text style={[styles.headerTitle, themeStyles.text]}>Agenda</Text>
-          <Text style={[styles.headerSubtitle, themeStyles.subText]}>
-            Notes, Tâches & Alertes Android
-          </Text>
-        </View>
-
-        <View style={styles.headerRight}>
-          {/* Bouton Réinitialiser la base de données */}
-          <TouchableOpacity
-            style={[styles.resetBtn, themeStyles.inputBorder]}
-            onPress={handleResetDatabase}
-            title="Réinitialiser la base de données"
-          >
-            <Text style={styles.resetBtnText}>🔄</Text>
-          </TouchableOpacity>
-
-          {/* Theme switcher */}
-          <TouchableOpacity
-            style={[styles.themeBtn, themeStyles.inputBorder]}
-            onPress={() => setManualTheme(isDark ? 'light' : 'dark')}
-          >
-            <Text style={styles.themeBtnText}>{isDark ? '☀️' : '🌙'}</Text>
-          </TouchableOpacity>
-
-          {/* Bouton Ajouter Moderne Lumineux */}
-          <TouchableOpacity
-            style={styles.addBtnModern}
-            onPress={() => {
-              setEditingId(null);
-              setNewTitle('');
-              setNewContent('');
-              setSubTasks([{ text: '', isUrgent: false }]);
-              setReminderMinutes(15);
-              setIsNoteUrgent(false);
-              setItemType('list');
-              setIsModalOpen(true);
-            }}
-          >
-            <Text style={styles.addBtnModernText}>＋ Créer</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
-
-      {/* Search & Filter Bar */}
-      <View style={styles.searchSection}>
-        <TextInput
-          placeholder="Rechercher une note ou tâche..."
-          placeholderTextColor={isDark ? '#71717a' : '#a1a1aa'}
-          value={searchQuery}
-          onChangeText={setSearchQuery}
-          style={[styles.searchInput, themeStyles.input]}
-        />
-
-        <View style={styles.filterRow}>
-          <TouchableOpacity
-            onPress={() => setActiveFilter('all')}
-            style={[
-              styles.filterTab,
-              activeFilter === 'all' && styles.filterTabActive,
-              themeStyles.filterTabBorder,
-            ]}
-          >
-            <Text
-              style={[
-                styles.filterTabText,
-                activeFilter === 'all' ? styles.filterTabTextActive : themeStyles.subText,
-              ]}
-            >
-              Tous ({notes.length})
-            </Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            onPress={() => setActiveFilter('list')}
-            style={[
-              styles.filterTab,
-              activeFilter === 'list' && styles.filterTabActive,
-              themeStyles.filterTabBorder,
-            ]}
-          >
-            <Text
-              style={[
-                styles.filterTabText,
-                activeFilter === 'list' ? styles.filterTabTextActive : themeStyles.subText,
-              ]}
-            >
-              Listes
-            </Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            onPress={() => setActiveFilter('note')}
-            style={[
-              styles.filterTab,
-              activeFilter === 'note' && styles.filterTabActive,
-              themeStyles.filterTabBorder,
-            ]}
-          >
-            <Text
-              style={[
-                styles.filterTabText,
-                activeFilter === 'note' ? styles.filterTabTextActive : themeStyles.subText,
-              ]}
-            >
-              Notes
-            </Text>
-          </TouchableOpacity>
-        </View>
-      </View>
-
-      {/* Main List avec Animation d'entrée fluide */}
-      <FlatList
-        data={filteredNotes}
-        keyExtractor={(item) => item.id}
-        contentContainerStyle={styles.listContainer}
-        renderItem={({ item, index }) => (
-          <AnimatedCard index={index}>
-            <View style={[styles.card, themeStyles.card, themeStyles.cardBorder]}>
-              {/* Card Header */}
-              <View style={styles.cardHeader}>
-                <View style={{ flex: 1 }}>
-                  <Text style={[styles.cardTitle, themeStyles.text]}>{item.title}</Text>
-                  <View style={styles.badgesRow}>
-                    {item.isUrgent && (
-                      <View style={styles.urgentBadge}>
-                        <Text style={styles.urgentBadgeText}>⚡ Urgent (5 min)</Text>
-                      </View>
-                    )}
-                    {item.reminderTime && (
-                      <View style={styles.reminderBadge}>
-                        <Text style={styles.reminderBadgeText}>🔔 {item.reminderTime}</Text>
-                      </View>
-                    )}
-                  </View>
-                </View>
-
-                <TouchableOpacity
-                  onPress={() => handleDeleteNote(item.id)}
-                  style={styles.cardDeleteBtn}
-                >
-                  <Text style={styles.cardDeleteBtnText}>✕</Text>
-                </TouchableOpacity>
-              </View>
-
-              {/* Note Content */}
-              {item.content ? (
-                <Text style={[styles.cardContent, themeStyles.subText]}>{item.content}</Text>
-              ) : null}
-
-              {/* Todos Checklist */}
-              {item.todos && item.todos.length > 0 && (
-                <View style={styles.todoList}>
-                  {item.todos.map((todo) => (
-                    <TouchableOpacity
-                      key={todo.id}
-                      onPress={() => handleToggleTodo(item.id, todo.id)}
-                      style={styles.todoRow}
-                    >
-                      <View
-                        style={[
-                          styles.todoCheckbox,
-                          todo.completed && styles.todoCheckboxChecked,
-                        ]}
-                      >
-                        {todo.completed && <Text style={styles.todoCheckmark}>✓</Text>}
-                      </View>
-                      <Text
-                        style={[
-                          styles.todoText,
-                          themeStyles.text,
-                          todo.completed && styles.todoTextCompleted,
-                        ]}
-                      >
-                        {todo.text}
-                      </Text>
-                      {todo.isUrgent && (
-                        <View style={styles.urgentTagSmall}>
-                          <Text style={styles.urgentTagSmallText}>⚡ 5m</Text>
-                        </View>
-                      )}
-                    </TouchableOpacity>
-                  ))}
-                </View>
-              )}
-            </View>
-          </AnimatedCard>
-        )}
-        ListEmptyComponent={
-          <View style={styles.emptyBox}>
-            <Text style={[styles.emptyText, themeStyles.subText]}>
-              Aucune note ou tâche pour le moment.
-            </Text>
-          </View>
-        }
+      {/* Navigation Drawer */}
+      <Drawer
+        isOpen={isDrawerOpen}
+        onClose={() => setIsDrawerOpen(false)}
+        activeTab={activeTab}
+        onSelectTab={setActiveTab}
+        notes={notes}
+        onImportNotes={handleImportDatabase}
+        theme={theme}
+        onToggleTheme={handleToggleTheme}
+        onOpenJsonDbModal={() => setIsJsonDbModalOpen(true)}
       />
 
-      {/* Pied de page Glassmorphique : Powered by Séraphin */}
-      <View style={[styles.glassFooter, themeStyles.glassFooter]}>
-        <Text style={[styles.footerText, themeStyles.subText]}>
-          Powered by <Text style={[styles.footerBrand, themeStyles.text]}>Séraphin</Text>
+      {/* Header Top Bar */}
+      <TopBar
+        onOpenDrawer={() => setIsDrawerOpen(true)}
+        searchQuery={searchQuery}
+        onSearchChange={setSearchQuery}
+        activeTab={activeTab}
+        filterType={filterType}
+        onFilterTypeChange={setFilterType}
+        theme={theme}
+        onToggleTheme={handleToggleTheme}
+      />
+
+      {/* Main Content Area */}
+      <ScrollView
+        style={styles.mainScrollView}
+        contentContainerStyle={styles.mainContentContainer}
+        keyboardShouldPersistTaps="handled"
+      >
+        {/* Smart Alert Banner */}
+        {activeTab !== 'trash' && (
+          <SmartAlertBanner
+            alerts={smartAlerts}
+            onOpenNote={handleOpenNoteFromAlert}
+            onCompleteTask={handleToggleTask}
+            onSnoozeTask={handleSnoozeTask}
+            enableSounds={settings.enableAlertSounds}
+            onToggleSound={() => {
+              const nextVal = !settings.enableAlertSounds;
+              setSettings({ ...settings, enableAlertSounds: nextVal });
+              saveSettings({ enableAlertSounds: nextVal });
+            }}
+            isDark={isDark}
+          />
+        )}
+
+        {/* View contextual banners */}
+        {activeTab === 'trash' && (
+          <View
+            style={[
+              styles.viewBanner,
+              isDark ? styles.trashBannerDark : styles.trashBannerLight,
+            ]}
+          >
+            <View style={styles.viewBannerLeft}>
+              <Trash2 size={20} color="#e11d48" />
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.viewBannerTitle, { color: '#be123c' }]}>
+                  Corbeille
+                </Text>
+                <Text style={[styles.viewBannerSub, isDark ? styles.subDark : styles.subLight]}>
+                  Les éléments supprimés restent ici jusqu'à leur suppression définitive ou restauration.
+                </Text>
+              </View>
+            </View>
+
+            {filteredNotes.length > 0 && (
+              <TouchableOpacity
+                onPress={handleRequestEmptyTrash}
+                style={styles.emptyTrashBtn}
+              >
+                <Trash2 size={13} color="#ffffff" />
+                <Text style={styles.emptyTrashBtnText}>Vider la corbeille</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+        )}
+
+        {activeTab === 'reminders' && (
+          <View
+            style={[
+              styles.viewBanner,
+              isDark ? styles.remindersBannerDark : styles.remindersBannerLight,
+            ]}
+          >
+            <View style={styles.viewBannerLeft}>
+              <View style={styles.remindersIconBox}>
+                <Clock size={18} color="#ffffff" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                  <Text style={[styles.viewBannerTitle, isDark ? styles.textDark : styles.textLight]}>
+                    Gestionnaire de Rappels
+                  </Text>
+                  <View style={styles.directBadge}>
+                    <Text style={styles.directBadgeText}>Direct</Text>
+                  </View>
+                </View>
+                <Text style={[styles.viewBannerSub, isDark ? styles.subDark : styles.subLight]}>
+                  Surveillance en temps réel. Alertes sonores et notifications prioritaires Android.
+                </Text>
+              </View>
+            </View>
+
+            <View style={styles.statsPillRow}>
+              <View style={[styles.statPill, isDark ? styles.statPillDark : styles.statPillLight]}>
+                <Text style={styles.statPillLabel}>Actifs :</Text>
+                <Text style={styles.statPillValueAmber}>{smartAlerts.length}</Text>
+              </View>
+              <View style={[styles.statPill, isDark ? styles.statPillDark : styles.statPillLight]}>
+                <Text style={styles.statPillLabel}>Listes :</Text>
+                <Text style={[styles.statPillValue, isDark ? styles.textDark : styles.textLight]}>
+                  {filteredNotes.length}
+                </Text>
+              </View>
+            </View>
+          </View>
+        )}
+
+        {activeTab === 'archive' && (
+          <View
+            style={[
+              styles.viewBanner,
+              isDark ? styles.archiveBannerDark : styles.archiveBannerLight,
+            ]}
+          >
+            <View style={styles.viewBannerLeft}>
+              <Archive size={20} color={isDark ? '#a8a29e' : '#78716c'} />
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.viewBannerTitle, isDark ? styles.textDark : styles.textLight]}>
+                  Archives
+                </Text>
+                <Text style={[styles.viewBannerSub, isDark ? styles.subDark : styles.subLight]}>
+                  Vos notes et listes archivées pour garder votre espace de travail épuré.
+                </Text>
+              </View>
+            </View>
+          </View>
+        )}
+
+        {/* Notes Grid / List */}
+        {filteredNotes.length === 0 ? (
+          /* Empty State */
+          <View style={styles.emptyContainer}>
+            <View style={[styles.emptyIconCircle, isDark ? styles.emptyCircleDark : styles.emptyCircleLight]}>
+              {activeTab === 'trash' ? (
+                <Trash2 size={32} color={isDark ? '#78716c' : '#a8a29e'} />
+              ) : activeTab === 'reminders' ? (
+                <Clock size={32} color={isDark ? '#78716c' : '#a8a29e'} />
+              ) : activeTab === 'archive' ? (
+                <Archive size={32} color={isDark ? '#78716c' : '#a8a29e'} />
+              ) : (
+                <Inbox size={32} color={isDark ? '#78716c' : '#a8a29e'} />
+              )}
+            </View>
+
+            <Text style={[styles.emptyTitle, isDark ? styles.textDark : styles.textLight]}>
+              {searchQuery
+                ? 'Aucun résultat trouvé'
+                : activeTab === 'trash'
+                ? 'La corbeille est vide'
+                : activeTab === 'reminders'
+                ? 'Aucun rappel programmé'
+                : activeTab === 'archive'
+                ? 'Aucune note archivée'
+                : 'Aucune note pour le moment'}
+            </Text>
+
+            <Text style={[styles.emptyDesc, isDark ? styles.subDark : styles.subLight]}>
+              {searchQuery
+                ? `Aucune note ne correspond à « ${searchQuery} ».`
+                : activeTab === 'trash'
+                ? 'Toutes les notes supprimées apparaîtront ici.'
+                : activeTab === 'reminders'
+                ? 'Définissez une heure sur vos tâches pour les voir s\'afficher ici avec surveillance intelligente.'
+                : activeTab === 'archive'
+                ? 'Archivez des notes pour les retrouver plus tard.'
+                : 'Créez votre première note ou liste interactive en cliquant ci-dessous !'}
+            </Text>
+
+            {activeTab === 'notes' && !searchQuery && (
+              <View style={styles.emptyActionsRow}>
+                <TouchableOpacity
+                  onPress={handleCreateNote}
+                  style={[
+                    styles.emptyBtn,
+                    isDark ? styles.emptyBtnDark : styles.emptyBtnLight,
+                  ]}
+                >
+                  <StickyNote size={15} color={isDark ? '#a8a29e' : '#78716c'} />
+                  <Text style={[styles.emptyBtnText, isDark ? styles.textDark : styles.textLight]}>
+                    Créer une note
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  onPress={handleOpenCreateListDialog}
+                  style={styles.emptyListBtn}
+                >
+                  <CheckSquare size={15} color="#ffffff" />
+                  <Text style={styles.emptyListBtnText}>Créer une liste</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+          </View>
+        ) : (
+          /* Cards Display */
+          <View style={styles.cardsWrapper}>
+            {/* Pinned Section */}
+            {activeTab === 'notes' && pinnedNotes.length > 0 && (
+              <View style={styles.sectionBlock}>
+                <View style={styles.sectionHeaderRow}>
+                  <Pin size={13} color="#d97706" fill="#d97706" />
+                  <Text style={styles.pinnedSectionTitle}>
+                    ÉPINGLÉES ({pinnedNotes.length})
+                  </Text>
+                </View>
+
+                {pinnedNotes.map((note) => (
+                  <NoteCard
+                    key={note.id}
+                    note={note}
+                    isTrashView={false}
+                    onEdit={setEditingNote}
+                    onTogglePin={handleTogglePin}
+                    onToggleReadOnly={handleToggleReadOnly}
+                    onToggleTask={handleToggleTask}
+                    onArchive={handleArchive}
+                    onUnarchive={handleUnarchive}
+                    onMoveToTrash={handleMoveToTrash}
+                    onRestoreFromTrash={handleRestoreFromTrash}
+                    onRequestPermanentDelete={handleRequestPermanentDelete}
+                    onChangeColor={handleChangeColor}
+                    isDark={isDark}
+                  />
+                ))}
+              </View>
+            )}
+
+            {/* Other Notes Section */}
+            {activeTab === 'notes' && otherNotes.length > 0 && (
+              <View style={styles.sectionBlock}>
+                {pinnedNotes.length > 0 && (
+                  <Text style={[styles.otherSectionTitle, isDark ? styles.subDark : styles.subLight]}>
+                    AUTRES ({otherNotes.length})
+                  </Text>
+                )}
+
+                {otherNotes.map((note) => (
+                  <NoteCard
+                    key={note.id}
+                    note={note}
+                    isTrashView={false}
+                    onEdit={setEditingNote}
+                    onTogglePin={handleTogglePin}
+                    onToggleReadOnly={handleToggleReadOnly}
+                    onToggleTask={handleToggleTask}
+                    onArchive={handleArchive}
+                    onUnarchive={handleUnarchive}
+                    onMoveToTrash={handleMoveToTrash}
+                    onRestoreFromTrash={handleRestoreFromTrash}
+                    onRequestPermanentDelete={handleRequestPermanentDelete}
+                    onChangeColor={handleChangeColor}
+                    isDark={isDark}
+                  />
+                ))}
+              </View>
+            )}
+
+            {/* Other Tabs (Reminders, Archive, Trash) */}
+            {activeTab !== 'notes' && (
+              <View style={styles.sectionBlock}>
+                {filteredNotes.map((note) => (
+                  <NoteCard
+                    key={note.id}
+                    note={note}
+                    isTrashView={activeTab === 'trash'}
+                    onEdit={setEditingNote}
+                    onTogglePin={handleTogglePin}
+                    onToggleReadOnly={handleToggleReadOnly}
+                    onToggleTask={handleToggleTask}
+                    onArchive={handleArchive}
+                    onUnarchive={handleUnarchive}
+                    onMoveToTrash={handleMoveToTrash}
+                    onRestoreFromTrash={handleRestoreFromTrash}
+                    onRequestPermanentDelete={handleRequestPermanentDelete}
+                    onChangeColor={handleChangeColor}
+                    isDark={isDark}
+                  />
+                ))}
+              </View>
+            )}
+          </View>
+        )}
+      </ScrollView>
+
+      {/* Footer "Powered by Séraphin" */}
+      <View
+        style={[
+          styles.footerContainer,
+          isDark ? styles.footerDark : styles.footerLight,
+        ]}
+      >
+        <Text style={[styles.footerText, isDark ? styles.subDark : styles.subLight]}>
+          Powered by <Text style={styles.footerBrand}>Séraphin</Text>
         </Text>
       </View>
 
-      {/* Modal Création / Édition */}
-      <Modal visible={isModalOpen} animationType="slide" transparent>
-        <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-          style={styles.modalOverlay}
-        >
-          <View style={[styles.modalCard, themeStyles.modalCard]}>
-            <ScrollView showsVerticalScrollIndicator={false}>
-              <View style={styles.modalHeaderRow}>
-                <Text style={[styles.modalHeading, themeStyles.text]}>
-                  {editingId ? 'Modifier la tâche' : 'Nouvelle liste ou tâche'}
-                </Text>
+      {/* Floating Action Button (+) */}
+      {activeTab !== 'trash' && (
+        <FloatingActionButton
+          onCreateNote={handleCreateNote}
+          onCreateList={handleOpenCreateListDialog}
+          isDark={isDark}
+        />
+      )}
 
-                {/* Bouton Décors & Polices Stylées */}
-                <TouchableOpacity
-                  style={styles.decorModalTrigger}
-                  onPress={() => {
-                    setDecorTarget('title');
-                    setIsDecorModalOpen(true);
-                  }}
-                >
-                  <Text style={styles.decorModalTriggerText}>✨ Décors & Polices</Text>
-                </TouchableOpacity>
-              </View>
+      {/* New List Title Prompt Modal */}
+      <NewListTitleModal
+        isOpen={isNewListModalOpen}
+        onClose={() => setIsNewListModalOpen(false)}
+        onSubmit={handleCreateListWithTitle}
+        isDark={isDark}
+      />
 
-              {/* Champ Titre avec style sombre garanti (fond foncé en mode sombre) */}
-              <Text style={[styles.inputLabel, themeStyles.subText]}>Titre de la liste *</Text>
-              <TextInput
-                value={newTitle}
-                onChangeText={setNewTitle}
-                placeholder="Ex: Préparation du week-end..."
-                placeholderTextColor={isDark ? '#71717a' : '#a1a1aa'}
-                style={[styles.modalInput, themeStyles.input]}
-              />
+      {/* Note / List Full Editor Modal */}
+      {editingNote && (
+        <NoteEditorModal
+          note={editingNote}
+          isOpen={Boolean(editingNote)}
+          onClose={() => setEditingNote(null)}
+          onSave={handleSaveEditedNote}
+          isDark={isDark}
+        />
+      )}
 
-              {/* Type selector */}
-              <View style={styles.typeRow}>
-                <TouchableOpacity
-                  onPress={() => setItemType('list')}
-                  style={[
-                    styles.typeBtn,
-                    itemType === 'list' && styles.typeBtnActive,
-                  ]}
-                >
-                  <Text
-                    style={[
-                      styles.typeBtnText,
-                      itemType === 'list' ? styles.typeBtnTextActive : themeStyles.text,
-                    ]}
-                  >
-                    ☑ Liste à cocher
-                  </Text>
-                </TouchableOpacity>
+      {/* JSON Database Management Modal */}
+      <JsonDatabaseModal
+        isOpen={isJsonDbModalOpen}
+        onClose={() => setIsJsonDbModalOpen(false)}
+        notes={notes}
+        settings={settings}
+        onImportDatabase={handleImportDatabase}
+        onResetToSeeds={handleResetToSeeds}
+        isDark={isDark}
+      />
 
-                <TouchableOpacity
-                  onPress={() => setItemType('note')}
-                  style={[
-                    styles.typeBtn,
-                    itemType === 'note' && styles.typeBtnActive,
-                  ]}
-                >
-                  <Text
-                    style={[
-                      styles.typeBtnText,
-                      itemType === 'note' ? styles.typeBtnTextActive : themeStyles.text,
-                    ]}
-                  >
-                    📝 Note libre
-                  </Text>
-                </TouchableOpacity>
-              </View>
-
-              {/* Option Tâche Urgente (Rappel toutes les 5 minutes) */}
-              <TouchableOpacity
-                style={[
-                  styles.urgentToggleBox,
-                  isNoteUrgent && styles.urgentToggleBoxActive,
-                  themeStyles.inputBorder,
-                ]}
-                onPress={() => setIsNoteUrgent(!isNoteUrgent)}
-              >
-                <Text style={styles.urgentIcon}>⚡</Text>
-                <View style={{ flex: 1 }}>
-                  <Text style={[styles.urgentTitle, isNoteUrgent && styles.urgentTitleActive]}>
-                    Tâche Urgente (Rappel 5 min)
-                  </Text>
-                  <Text style={styles.urgentDesc}>
-                    Envoie une notification sonore toutes les 5 minutes même application fermée.
-                  </Text>
-                </View>
-                <View style={[styles.checkboxCircle, isNoteUrgent && styles.checkboxCircleActive]}>
-                  {isNoteUrgent && <Text style={styles.checkboxCheck}>✓</Text>}
-                </View>
-              </TouchableOpacity>
-
-              {/* Subtasks (if list) */}
-              {itemType === 'list' && (
-                <View style={styles.subtasksSection}>
-                  <Text style={[styles.inputLabel, themeStyles.subText]}>
-                    Éléments de la liste :
-                  </Text>
-                  {subTasks.map((taskObj, idx) => (
-                    <View key={idx} style={styles.subtaskRow}>
-                      <TextInput
-                        value={taskObj.text}
-                        onChangeText={(txt) => {
-                          const updated = [...subTasks];
-                          updated[idx] = { ...updated[idx], text: txt };
-                          setSubTasks(updated);
-                        }}
-                        placeholder={`Élément ${idx + 1}...`}
-                        placeholderTextColor={isDark ? '#71717a' : '#a1a1aa'}
-                        style={[styles.modalInput, themeStyles.input, { flex: 1, marginBottom: 6 }]}
-                      />
-                      <TouchableOpacity
-                        style={[
-                          styles.urgentSubtaskBtn,
-                          taskObj.isUrgent && styles.urgentSubtaskBtnActive,
-                        ]}
-                        onPress={() => {
-                          const updated = [...subTasks];
-                          updated[idx] = { ...updated[idx], isUrgent: !updated[idx].isUrgent };
-                          setSubTasks(updated);
-                        }}
-                        title="Tâche urgente (5 min)"
-                      >
-                        <Text style={styles.urgentSubtaskBtnText}>⚡</Text>
-                      </TouchableOpacity>
-                    </View>
-                  ))}
-                  <TouchableOpacity
-                    onPress={() => setSubTasks([...subTasks, { text: '', isUrgent: false }])}
-                    style={styles.addSubtaskBtn}
-                  >
-                    <Text style={styles.addSubtaskBtnText}>+ Ajouter un élément</Text>
-                  </TouchableOpacity>
-                </View>
-              )}
-
-              {/* Description / Content */}
-              <View style={styles.contentLabelRow}>
-                <Text style={[styles.inputLabel, themeStyles.subText]}>Note ou description</Text>
-                <TouchableOpacity
-                  onPress={() => {
-                    setDecorTarget('content');
-                    setIsDecorModalOpen(true);
-                  }}
-                >
-                  <Text style={styles.decorLinkText}>✨ Insérer décor / police</Text>
-                </TouchableOpacity>
-              </View>
-
-              <TextInput
-                value={newContent}
-                onChangeText={setNewContent}
-                placeholder="Détails supplémentaires..."
-                placeholderTextColor={isDark ? '#71717a' : '#a1a1aa'}
-                multiline
-                numberOfLines={3}
-                style={[styles.modalInput, styles.modalTextarea, themeStyles.input]}
-              />
-
-              {/* Rappel d'alarme Android (même fermé) */}
-              <Text style={[styles.inputLabel, themeStyles.subText]}>
-                🔔 Rappel d'alarme Android (même application fermée) :
-              </Text>
-              <View style={styles.presetReminders}>
-                {[15, 30, 60, 120].map((mins) => (
-                  <TouchableOpacity
-                    key={mins}
-                    onPress={() => setReminderMinutes(mins)}
-                    style={[
-                      styles.presetBadge,
-                      reminderMinutes === mins && styles.presetBadgeActive,
-                      themeStyles.inputBorder,
-                    ]}
-                  >
-                    <Text
-                      style={[
-                        styles.presetBadgeText,
-                        reminderMinutes === mins && styles.presetBadgeTextActive,
-                      ]}
-                    >
-                      +{mins >= 60 ? `${mins / 60}h` : `${mins}m`}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-                <TouchableOpacity
-                  onPress={() => setReminderMinutes(null)}
-                  style={[
-                    styles.presetBadge,
-                    reminderMinutes === null && styles.presetBadgeActive,
-                    themeStyles.inputBorder,
-                  ]}
-                >
-                  <Text
-                    style={[
-                      styles.presetBadgeText,
-                      reminderMinutes === null && styles.presetBadgeTextActive,
-                    ]}
-                  >
-                    Aucun
-                  </Text>
-                </TouchableOpacity>
-              </View>
-
-              {/* Actions */}
-              <View style={styles.modalActions}>
-                <TouchableOpacity
-                  onPress={() => setIsModalOpen(false)}
-                  style={[styles.actionBtn, styles.cancelActionBtn]}
-                >
-                  <Text style={themeStyles.text}>Annuler</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  onPress={handleSaveItem}
-                  style={[styles.actionBtn, styles.saveActionBtn]}
-                >
-                  <Text style={styles.saveActionBtnText}>Enregistrer</Text>
-                </TouchableOpacity>
-              </View>
-            </ScrollView>
-          </View>
-        </KeyboardAvoidingView>
-      </Modal>
-
-      {/* Modal Décors & Polices Stylées */}
-      <Modal visible={isDecorModalOpen} animationType="fade" transparent>
-        <View style={styles.decorModalOverlay}>
-          <View style={[styles.decorModalCard, themeStyles.modalCard]}>
-            <View style={styles.decorHeaderRow}>
-              <Text style={[styles.decorModalHeading, themeStyles.text]}>
-                ✨ Décors & Polices Ultra Stylées
-              </Text>
-              <TouchableOpacity onPress={() => setIsDecorModalOpen(false)}>
-                <Text style={styles.closeDecorBtn}>✕</Text>
-              </TouchableOpacity>
-            </View>
-
-            <Text style={[styles.decorTargetLabel, themeStyles.subText]}>
-              Application actuelle sur le :{' '}
-              <Text style={{ fontWeight: 'bold', color: '#d97706' }}>
-                {decorTarget === 'title' ? 'Titre' : 'Contenu'}
-              </Text>
-            </Text>
-
-            <ScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: 420 }}>
-              {/* Polices Unicode Stylées */}
-              <Text style={[styles.decorSectionTitle, themeStyles.text]}>
-                🔤 Polices Stylées (convertit le texte) :
-              </Text>
-              <View style={styles.fontGrid}>
-                {[
-                  { id: 'serif-bold', name: '𝐒𝐞𝐫𝐢𝐟 𝐆𝐫𝐚𝐬' },
-                  { id: 'cursive', name: '𝒞𝓊𝓇𝓈𝒾𝓋ℯ' },
-                  { id: 'gothic', name: '𝔊𝔬𝔱𝔥𝔦𝔮𝔲𝔢' },
-                  { id: 'double-struck', name: '𝔻𝕠𝕦𝕓𝕝𝕖' },
-                  { id: 'bubble', name: 'ⓑⓤⓑⓑⓛⓔ' },
-                  { id: 'monospace', name: '𝙼𝚘𝚗𝚘' },
-                ].map((f) => (
-                  <TouchableOpacity
-                    key={f.id}
-                    style={[styles.fontBtn, themeStyles.inputBorder]}
-                    onPress={() => handleApplyFontStyle(f.id as FontStyleType)}
-                  >
-                    <Text style={[styles.fontBtnText, themeStyles.text]}>{f.name}</Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-
-              {/* Cadres et décors spéciaux demandés par l'utilisateur */}
-              <Text style={[styles.decorSectionTitle, themeStyles.text, { marginTop: 14 }]}>
-                🎨 Cadres & Séparateurs Artistiques :
-              </Text>
-              {DECORATIONS.map((item) => (
-                <TouchableOpacity
-                  key={item.id}
-                  style={[styles.decorItemBtn, themeStyles.inputBorder]}
-                  onPress={() => handleApplyDecor(item.template)}
-                >
-                  <Text style={[styles.decorItemName, { color: '#d97706' }]}>{item.name}</Text>
-                  <Text style={[styles.decorItemPreview, themeStyles.text]}>{item.template}</Text>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-          </View>
-        </View>
-      </Modal>
+      {/* Delete Confirmation Modal */}
+      <DeleteConfirmModal
+        isOpen={deleteConfirmState.isOpen}
+        title={deleteConfirmState.title}
+        message={deleteConfirmState.message}
+        onConfirm={deleteConfirmState.confirmAction}
+        onCancel={() => setDeleteConfirmState((s) => ({ ...s, isOpen: false }))}
+        isDark={isDark}
+      />
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  safeArea: { flex: 1 },
-  header: {
-    paddingHorizontal: 16,
-    paddingVertical: 12,
+  safeArea: {
+    flex: 1,
+  },
+  safeAreaLight: {
+    backgroundColor: '#f5f5f4',
+  },
+  safeAreaDark: {
+    backgroundColor: '#0c0a09',
+  },
+  mainScrollView: {
+    flex: 1,
+  },
+  mainContentContainer: {
+    paddingBottom: 90,
+  },
+  viewBanner: {
+    marginHorizontal: 16,
+    marginTop: 10,
+    marginBottom: 12,
+    padding: 14,
+    borderRadius: 16,
+    borderWidth: 1,
+    gap: 10,
+  },
+  trashBannerLight: {
+    backgroundColor: '#fff1f2',
+    borderColor: '#fecdd3',
+  },
+  trashBannerDark: {
+    backgroundColor: 'rgba(76, 5, 25, 0.3)',
+    borderColor: '#881337',
+  },
+  remindersBannerLight: {
+    backgroundColor: '#fffbeb',
+    borderColor: '#fde68a',
+  },
+  remindersBannerDark: {
+    backgroundColor: 'rgba(120, 53, 15, 0.25)',
+    borderColor: '#78350f',
+  },
+  archiveBannerLight: {
+    backgroundColor: '#f5f5f4',
+    borderColor: '#e7e5e4',
+  },
+  archiveBannerDark: {
+    backgroundColor: '#1c1917',
+    borderColor: '#292524',
+  },
+  viewBannerLeft: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+  },
+  remindersIconBox: {
+    width: 32,
+    height: 32,
+    borderRadius: 10,
+    backgroundColor: '#f59e0b',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  viewBannerTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  viewBannerSub: {
+    fontSize: 11,
+    lineHeight: 15,
+    marginTop: 2,
+  },
+  directBadge: {
+    backgroundColor: 'rgba(245, 158, 11, 0.2)',
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+    borderRadius: 8,
+  },
+  directBadgeText: {
+    fontSize: 9,
+    fontWeight: '800',
+    color: '#b45309',
+  },
+  emptyTrashBtn: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    borderBottomWidth: 1,
-  },
-  headerTitle: { fontSize: 22, fontWeight: 'bold' },
-  headerSubtitle: { fontSize: 11, marginTop: 2 },
-  headerRight: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  resetBtn: {
-    paddingHorizontal: 9,
+    alignSelf: 'flex-start',
+    gap: 6,
+    backgroundColor: '#dc2626',
+    paddingHorizontal: 12,
     paddingVertical: 7,
     borderRadius: 10,
+  },
+  emptyTrashBtnText: {
+    color: '#ffffff',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  statsPillRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 4,
+  },
+  statPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 10,
     borderWidth: 1,
+  },
+  statPillLight: {
+    backgroundColor: '#ffffff',
+    borderColor: '#e7e5e4',
+  },
+  statPillDark: {
+    backgroundColor: '#292524',
+    borderColor: '#44403c',
+  },
+  statPillLabel: {
+    fontSize: 11,
+    color: '#78716c',
+  },
+  statPillValue: {
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  statPillValueAmber: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#d97706',
+  },
+  emptyContainer: {
     alignItems: 'center',
     justifyContent: 'center',
+    paddingVertical: 60,
+    paddingHorizontal: 24,
   },
-  resetBtnText: { fontSize: 15 },
-  themeBtn: { padding: 7, borderRadius: 10, borderWidth: 1 },
-  themeBtnText: { fontSize: 15 },
-
-  // Bouton Ajouter Moderne Lumineux avec Shadow & Rounded
-  addBtnModern: {
-    backgroundColor: '#d97706',
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: '#f59e0b',
-    shadowColor: '#d97706',
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.35,
-    shadowRadius: 5,
-    elevation: 4,
-  },
-  addBtnModernText: { color: '#ffffff', fontWeight: 'bold', fontSize: 13 },
-
-  searchSection: { paddingHorizontal: 16, paddingTop: 10, paddingBottom: 4 },
-  searchInput: {
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderRadius: 12,
-    fontSize: 14,
-    borderWidth: 1,
-  },
-  filterRow: { flexDirection: 'row', gap: 8, marginTop: 10 },
-  filterTab: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
+  emptyIconCircle: {
+    width: 64,
+    height: 64,
     borderRadius: 20,
-    borderWidth: 1,
-  },
-  filterTabActive: { backgroundColor: '#d97706', borderColor: '#d97706' },
-  filterTabText: { fontSize: 12, fontWeight: '600' },
-  filterTabTextActive: { color: '#ffffff' },
-  listContainer: { padding: 16, paddingBottom: 24 },
-  card: {
-    padding: 16,
-    borderRadius: 16,
-    marginBottom: 12,
-    borderWidth: 1,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
-    elevation: 2,
-  },
-  cardHeader: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between' },
-  cardTitle: { fontSize: 16, fontWeight: 'bold' },
-  cardDeleteBtn: { padding: 4 },
-  cardDeleteBtnText: { color: '#ef4444', fontSize: 16, fontWeight: 'bold' },
-  badgesRow: { flexDirection: 'row', gap: 6, flexWrap: 'wrap', marginTop: 4 },
-  urgentBadge: {
-    alignSelf: 'flex-start',
-    backgroundColor: '#fee2e2',
-    paddingHorizontal: 8,
-    paddingVertical: 2.5,
-    borderRadius: 8,
-  },
-  urgentBadgeText: { fontSize: 10, color: '#b91c1c', fontWeight: 'bold' },
-  reminderBadge: {
-    alignSelf: 'flex-start',
-    backgroundColor: '#fef3c7',
-    paddingHorizontal: 8,
-    paddingVertical: 2.5,
-    borderRadius: 8,
-  },
-  reminderBadgeText: { fontSize: 10, color: '#92400e', fontWeight: '600' },
-  cardContent: { fontSize: 13, marginTop: 8, lineHeight: 18 },
-  todoList: { marginTop: 12, gap: 8 },
-  todoRow: { flexDirection: 'row', alignItems: 'center' },
-  todoCheckbox: {
-    width: 20,
-    height: 20,
-    borderRadius: 5,
-    borderWidth: 2,
-    borderColor: '#d97706',
-    marginRight: 10,
     alignItems: 'center',
     justifyContent: 'center',
+    marginBottom: 14,
   },
-  todoCheckboxChecked: { backgroundColor: '#d97706' },
-  todoCheckmark: { color: '#fff', fontSize: 11, fontWeight: 'bold' },
-  todoText: { fontSize: 14, flex: 1 },
-  todoTextCompleted: { textDecorationLine: 'line-through', opacity: 0.5 },
-  urgentTagSmall: {
-    backgroundColor: '#fee2e2',
-    paddingHorizontal: 5,
-    paddingVertical: 2,
-    borderRadius: 6,
+  emptyCircleLight: {
+    backgroundColor: '#e7e5e4',
   },
-  urgentTagSmallText: { color: '#b91c1c', fontSize: 9, fontWeight: 'bold' },
-  emptyBox: { alignItems: 'center', marginTop: 50 },
-  emptyText: { fontSize: 14 },
-
-  // Pied de page glassmorfique
-  glassFooter: {
-    paddingVertical: 13,
+  emptyCircleDark: {
+    backgroundColor: '#292524',
+  },
+  emptyTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    marginBottom: 6,
+    textAlign: 'center',
+  },
+  emptyDesc: {
+    fontSize: 12,
+    lineHeight: 18,
+    textAlign: 'center',
+    maxWidth: 280,
+    marginBottom: 20,
+  },
+  emptyActionsRow: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  emptyBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 14,
+    paddingVertical: 9,
+    borderRadius: 12,
+    borderWidth: 1,
+  },
+  emptyBtnLight: {
+    backgroundColor: '#ffffff',
+    borderColor: '#d6d3d1',
+  },
+  emptyBtnDark: {
+    backgroundColor: '#292524',
+    borderColor: '#44403c',
+  },
+  emptyBtnText: {
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  emptyListBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: '#f59e0b',
+    paddingHorizontal: 16,
+    paddingVertical: 9,
+    borderRadius: 12,
+  },
+  emptyListBtnText: {
+    color: '#ffffff',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  cardsWrapper: {
+    paddingHorizontal: 16,
+    paddingTop: 8,
+  },
+  sectionBlock: {
+    marginBottom: 14,
+  },
+  sectionHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 10,
+    paddingHorizontal: 4,
+  },
+  pinnedSectionTitle: {
+    fontSize: 11,
+    fontWeight: '800',
+    letterSpacing: 0.8,
+    color: '#b45309',
+  },
+  otherSectionTitle: {
+    fontSize: 11,
+    fontWeight: '800',
+    letterSpacing: 0.8,
+    marginBottom: 10,
+    paddingHorizontal: 4,
+  },
+  footerContainer: {
+    paddingVertical: 12,
     alignItems: 'center',
     justifyContent: 'center',
     borderTopWidth: 1,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: -2 },
-    shadowOpacity: 0.04,
-    shadowRadius: 6,
-    elevation: 3,
   },
-  footerText: { fontSize: 12, fontWeight: '500' },
-  footerBrand: { fontWeight: 'bold' },
-
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.55)',
-    justifyContent: 'flex-end',
+  footerLight: {
+    backgroundColor: '#ffffff',
+    borderTopColor: '#e7e5e4',
   },
-  modalCard: {
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    padding: 20,
-    maxHeight: '92%',
+  footerDark: {
+    backgroundColor: '#1c1917',
+    borderTopColor: '#292524',
   },
-  modalHeaderRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 12,
+  footerText: {
+    fontSize: 12,
+    fontWeight: '500',
   },
-  modalHeading: { fontSize: 17, fontWeight: 'bold' },
-  decorModalTrigger: {
-    backgroundColor: '#fef3c7',
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#fde68a',
+  footerBrand: {
+    fontWeight: '800',
+    color: '#d97706',
+    letterSpacing: 0.5,
   },
-  decorModalTriggerText: { color: '#92400e', fontSize: 11, fontWeight: 'bold' },
-
-  inputLabel: { fontSize: 12, fontWeight: '600', marginBottom: 5, marginTop: 8 },
-  contentLabelRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginTop: 8,
+  textLight: {
+    color: '#1c1917',
   },
-  decorLinkText: { fontSize: 11, color: '#d97706', fontWeight: 'bold' },
-
-  // Le champ textuel est explicitement adapté au thème sombre
-  modalInput: {
-    borderWidth: 1,
-    borderRadius: 12,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    fontSize: 14,
+  textDark: {
+    color: '#f5f5f4',
   },
-  modalTextarea: { height: 75, textAlignVertical: 'top' },
-  typeRow: { flexDirection: 'row', gap: 10, marginTop: 10, marginBottom: 8 },
-  typeBtn: {
-    flex: 1,
-    paddingVertical: 9,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#cbd5e1',
-    alignItems: 'center',
+  subLight: {
+    color: '#78716c',
   },
-  typeBtnActive: { backgroundColor: '#d97706', borderColor: '#d97706' },
-  typeBtnText: { fontSize: 13, fontWeight: '600' },
-  typeBtnTextActive: { color: '#ffffff' },
-
-  urgentToggleBox: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    padding: 12,
-    borderRadius: 12,
-    borderWidth: 1,
-    marginVertical: 8,
-    backgroundColor: 'rgba(239, 68, 68, 0.05)',
+  subDark: {
+    color: '#a8a29e',
   },
-  urgentToggleBoxActive: {
-    backgroundColor: 'rgba(239, 68, 68, 0.12)',
-    borderColor: '#ef4444',
-  },
-  urgentIcon: { fontSize: 18 },
-  urgentTitle: { fontSize: 13, fontWeight: 'bold', color: '#b91c1c' },
-  urgentTitleActive: { color: '#dc2626' },
-  urgentDesc: { fontSize: 10, color: '#78716c', marginTop: 1 },
-  checkboxCircle: {
-    width: 20,
-    height: 20,
-    borderRadius: 10,
-    borderWidth: 2,
-    borderColor: '#d6d3d1',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  checkboxCircleActive: {
-    backgroundColor: '#dc2626',
-    borderColor: '#dc2626',
-  },
-  checkboxCheck: { color: '#fff', fontSize: 10, fontWeight: 'bold' },
-
-  subtasksSection: { marginTop: 4 },
-  subtaskRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  urgentSubtaskBtn: {
-    padding: 8,
-    borderRadius: 10,
-    backgroundColor: 'rgba(150,150,150,0.1)',
-    marginBottom: 6,
-  },
-  urgentSubtaskBtnActive: {
-    backgroundColor: '#ef4444',
-  },
-  urgentSubtaskBtnText: { fontSize: 12 },
-  addSubtaskBtn: { paddingVertical: 6 },
-  addSubtaskBtnText: { color: '#d97706', fontSize: 13, fontWeight: 'bold' },
-  presetReminders: { flexDirection: 'row', gap: 8, flexWrap: 'wrap', marginTop: 4 },
-  presetBadge: {
-    paddingHorizontal: 12,
-    paddingVertical: 7,
-    borderRadius: 10,
-    borderWidth: 1,
-  },
-  presetBadgeActive: { backgroundColor: '#d97706', borderColor: '#d97706' },
-  presetBadgeText: { fontSize: 12, fontWeight: '600', color: '#78716c' },
-  presetBadgeTextActive: { color: '#ffffff' },
-  modalActions: { flexDirection: 'row', justifyContent: 'flex-end', gap: 10, marginTop: 20 },
-  actionBtn: { paddingHorizontal: 16, paddingVertical: 11, borderRadius: 12 },
-  cancelActionBtn: { backgroundColor: 'rgba(150,150,150,0.15)' },
-  saveActionBtn: { backgroundColor: '#d97706' },
-  saveActionBtnText: { color: '#ffffff', fontWeight: 'bold' },
-
-  // Modal décors
-  decorModalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.65)',
-    justifyContent: 'center',
-    padding: 16,
-  },
-  decorModalCard: {
-    borderRadius: 20,
-    padding: 18,
-  },
-  decorHeaderRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 8,
-  },
-  decorModalHeading: { fontSize: 16, fontWeight: 'bold' },
-  closeDecorBtn: { fontSize: 18, color: '#78716c', padding: 4 },
-  decorTargetLabel: { fontSize: 12, marginBottom: 12 },
-  decorSectionTitle: { fontSize: 13, fontWeight: 'bold', marginBottom: 8 },
-  fontGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  fontBtn: {
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 10,
-    borderWidth: 1,
-  },
-  fontBtnText: { fontSize: 13 },
-  decorItemBtn: {
-    padding: 10,
-    borderRadius: 10,
-    borderWidth: 1,
-    marginBottom: 8,
-  },
-  decorItemName: { fontSize: 11, fontWeight: 'bold', marginBottom: 3 },
-  decorItemPreview: { fontSize: 12, fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace' },
-});
-
-const lightTheme = StyleSheet.create({
-  background: { backgroundColor: '#fcfbf9' },
-  border: { borderBottomColor: '#e7e5e4' },
-  card: { backgroundColor: '#ffffff' },
-  cardBorder: { borderColor: '#e7e5e4' },
-  text: { color: '#1c1917' },
-  subText: { color: '#78716c' },
-  input: { backgroundColor: '#f5f5f4', borderColor: '#d6d3d1', color: '#1c1917' },
-  inputBorder: { borderColor: '#e7e5e4' },
-  filterTabBorder: { borderColor: '#e7e5e4' },
-  glassFooter: {
-    borderTopColor: 'rgba(231, 229, 228, 0.8)',
-    backgroundColor: 'rgba(255, 255, 255, 0.75)',
-  },
-  modalCard: { backgroundColor: '#ffffff' },
-});
-
-const darkTheme = StyleSheet.create({
-  background: { backgroundColor: '#18181b' },
-  border: { borderBottomColor: '#27272a' },
-  card: { backgroundColor: '#27272a' },
-  cardBorder: { borderColor: '#3f3f46' },
-  text: { color: '#f4f4f5' },
-  subText: { color: '#a1a1aa' },
-  input: { backgroundColor: '#27272a', borderColor: '#3f3f46', color: '#f4f4f5' },
-  inputBorder: { borderColor: '#3f3f46' },
-  filterTabBorder: { borderColor: '#3f3f46' },
-  glassFooter: {
-    borderTopColor: 'rgba(63, 63, 70, 0.5)',
-    backgroundColor: 'rgba(24, 24, 27, 0.75)',
-  },
-  modalCard: { backgroundColor: '#27272a' },
 });
