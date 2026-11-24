@@ -410,27 +410,49 @@ export const NoteEditorModal: React.FC<NoteEditorModalProps> = ({
                     ]}
                   />
 
-                  {/* Task options row: Time presets & Urgent Flag */}
-                  <View style={styles.addTaskOptions}>
-                    <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-                      <TouchableOpacity
-                        onPress={() => setNewTaskIsUrgent(!newTaskIsUrgent)}
+                  {/* Custom Time & Urgent Flag */}
+                  <View style={styles.timeInputRow}>
+                    <View
+                      style={[
+                        styles.customTimeBox,
+                        isDark ? styles.customTimeBoxDark : styles.customTimeBoxLight,
+                      ]}
+                    >
+                      <Clock size={12} color={isDark ? '#fbbf24' : '#d97706'} />
+                      <TextInput
+                        value={newTaskTime}
+                        onChangeText={setNewTaskTime}
+                        placeholder="Heure exacte (ex: 14:00)"
+                        placeholderTextColor={isDark ? '#78716c' : '#a8a29e'}
                         style={[
-                          styles.presetPill,
-                          newTaskIsUrgent ? styles.urgentPillActive : null,
+                          styles.customTimeInputText,
+                          isDark ? styles.textDark : styles.textLight,
+                        ]}
+                      />
+                    </View>
+
+                    <TouchableOpacity
+                      onPress={() => setNewTaskIsUrgent(!newTaskIsUrgent)}
+                      style={[
+                        styles.presetPill,
+                        newTaskIsUrgent ? styles.urgentPillActive : null,
+                      ]}
+                    >
+                      <Flag size={11} color={newTaskIsUrgent ? '#ffffff' : '#ef4444'} />
+                      <Text
+                        style={[
+                          styles.presetPillText,
+                          newTaskIsUrgent ? { color: '#ffffff', fontWeight: '800' } : { color: '#ef4444' },
                         ]}
                       >
-                        <Flag size={11} color={newTaskIsUrgent ? '#ffffff' : '#ef4444'} />
-                        <Text
-                          style={[
-                            styles.presetPillText,
-                            newTaskIsUrgent ? { color: '#ffffff', fontWeight: '800' } : { color: '#ef4444' },
-                          ]}
-                        >
-                          Urgent ⚡ (5 min)
-                        </Text>
-                      </TouchableOpacity>
+                        Urgent ⚡ (5 min)
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
 
+                  {/* Task options row: Time presets */}
+                  <View style={styles.addTaskOptions}>
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false}>
                       {presets.map((p) => (
                         <TouchableOpacity
                           key={p.label}
@@ -775,6 +797,34 @@ const styles = StyleSheet.create({
   addTaskInput: {
     fontSize: 13,
     paddingVertical: 4,
+  },
+  timeInputRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  customTimeBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 8,
+    borderWidth: 1,
+    flex: 1,
+  },
+  customTimeBoxLight: {
+    backgroundColor: '#ffffff',
+    borderColor: '#e7e5e4',
+  },
+  customTimeBoxDark: {
+    backgroundColor: '#1c1917',
+    borderColor: '#44403c',
+  },
+  customTimeInputText: {
+    fontSize: 12,
+    flex: 1,
+    paddingVertical: 2,
   },
   addTaskOptions: {
     flexDirection: 'row',

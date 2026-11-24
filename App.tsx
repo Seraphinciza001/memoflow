@@ -32,6 +32,13 @@ import {
   getActiveSmartAlerts,
   addMinutesToTime,
 } from './src/utils/time';
+import {
+  setupNotificationChannels,
+  scheduleAllTaskReminders,
+  runUrgentAndOverdueCheck,
+  sendTestNotification,
+  MEMOFLOW_CHANNEL_ID,
+} from './src/utils/notifications';
 import { TopBar } from './src/components/TopBar';
 import { Drawer } from './src/components/Drawer';
 import { SmartAlertBanner } from './src/components/SmartAlertBanner';
@@ -111,27 +118,9 @@ export default function App() {
   // Initialisation Android notifications & chargement storage
   useEffect(() => {
     (async () => {
-      // Permissions notifications
+      // Configuration des canaux et permissions notifications MemoFlow
       try {
-        const { status: existingStatus } = await Notifications.getPermissionsAsync();
-        let finalStatus = existingStatus;
-        if (existingStatus !== 'granted') {
-          const { status } = await Notifications.requestPermissionsAsync();
-          finalStatus = status;
-        }
-
-        if (Platform.OS === 'android') {
-          await Notifications.setNotificationChannelAsync('agenda-seraphin-channel', {
-            name: 'Rappels & Alarmes Agenda',
-            description: 'Canal pour les alertes de tâches même application fermée',
-            importance: Notifications.AndroidImportance.MAX,
-            vibrationPattern: [0, 250, 250, 250, 500, 250],
-            lightColor: '#d97706',
-            lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
-            bypassDnd: true,
-            sound: 'default',
-          });
-        }
+        await setupNotificationChannels();
 
         const isRegistered = await TaskManager.isTaskRegisteredAsync(BACKGROUND_NOTIFICATION_TASK);
         if (!isRegistered) {
@@ -141,10 +130,12 @@ export default function App() {
         console.warn('Erreur setup notifications Android:', err);
       }
 
-      // Chargement des données locales
+      // Chargement des données locales & planification des rappels
       try {
         const loaded = await loadNotes();
         setNotes(loaded);
+        await scheduleAllTaskReminders(loaded);
+
         const savedSettings = await loadSettings();
         setSettings(savedSettings);
         if (savedSettings.theme) setTheme(savedSettings.theme);
@@ -162,10 +153,11 @@ export default function App() {
     return () => clearInterval(interval);
   }, []);
 
-  // Save to AsyncStorage whenever notes change
+  // Save to AsyncStorage whenever notes change & update scheduled push alerts
   const handlePersistNotes = async (updated: NoteItem[]) => {
     setNotes(updated);
     await saveNotes(updated);
+    await scheduleAllTaskReminders(updated);
   };
 
   const handleToggleTheme = () => {
@@ -186,42 +178,21 @@ export default function App() {
     return getActiveSmartAlerts(notes);
   }, [notes, ticker]);
 
-  // Urgent tasks recurring alarm every 5 minutes on Android
+  // Urgent and Overdue recurring friendly push check (style Duolingo / WhatsApp)
   useEffect(() => {
-    const notifyUrgentTasks = async () => {
-      const urgentPending: { text: string; noteTitle: string }[] = [];
-      notes.forEach((n) => {
-        if (!n.isDeleted && !n.isArchived && Array.isArray(n.tasks)) {
-          n.tasks.forEach((t) => {
-            if (t.isUrgent && !t.completed) {
-              urgentPending.push({ text: t.text, noteTitle: n.title || 'Liste' });
-            }
-          });
-        }
-      });
+    // Run an initial check after 30 seconds
+    const initialTimeout = setTimeout(() => {
+      runUrgentAndOverdueCheck(notes);
+    }, 30000);
 
-      if (urgentPending.length > 0) {
-        try {
-          const first = urgentPending[0];
-          const extra = urgentPending.length > 1 ? ` (+${urgentPending.length - 1} autre(s))` : '';
-          await Notifications.scheduleNotificationAsync({
-            content: {
-              title: '⚡ TÂCHE URGENTE (Rappel 5 min)',
-              body: `« ${first.text} » (${first.noteTitle})${extra}\nÀ faire rapidement !`,
-              sound: true,
-              priority: Notifications.AndroidNotificationPriority.MAX,
-              channelId: 'agenda-seraphin-channel',
-            } as any,
-            trigger: null,
-          });
-        } catch (e) {
-          console.warn('Erreur notification urgente:', e);
-        }
-      }
+    const intervalId = setInterval(() => {
+      runUrgentAndOverdueCheck(notes);
+    }, 3 * 60 * 1000); // Check every 3 minutes
+
+    return () => {
+      clearTimeout(initialTimeout);
+      clearInterval(intervalId);
     };
-
-    const intervalId = setInterval(notifyUrgentTasks, 5 * 60 * 1000);
-    return () => clearInterval(intervalId);
   }, [notes]);
 
   // Filter and search notes

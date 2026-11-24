@@ -39,7 +39,7 @@ export const JsonDatabaseModal: React.FC<JsonDatabaseModalProps> = ({
   const handleShareJson = async () => {
     try {
       await Share.share({
-        title: 'Export Base JSON Agenda',
+        title: 'Export Base JSON MemoFlow',
         message: JSON.stringify(fullDb, null, 2),
       });
     } catch (e) {

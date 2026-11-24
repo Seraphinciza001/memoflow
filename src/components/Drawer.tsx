@@ -3,6 +3,7 @@ import {
   StyleSheet,
   View,
   Text,
+  Image,
   TouchableOpacity,
   Modal,
   ScrollView,
@@ -25,6 +26,7 @@ import {
 } from '../SVG';
 import { DrawerTab, NoteItem, ThemeMode, JsonDatabase } from '../types';
 import { getFullJsonDatabase, loadSettings } from '../utils/storage';
+import { sendTestNotification } from '../utils/notifications';
 
 interface DrawerProps {
   isOpen: boolean;
@@ -64,7 +66,7 @@ export const Drawer: React.FC<DrawerProps> = ({
       const db = getFullJsonDatabase(notes, s);
       const jsonStr = JSON.stringify(db, null, 2);
       await Share.share({
-        title: 'Export Base de données Agenda',
+        title: 'Export Base de données MemoFlow',
         message: jsonStr,
       });
     } catch (err) {
@@ -154,7 +156,11 @@ export const Drawer: React.FC<DrawerProps> = ({
           >
             <View style={styles.headerTitleGroup}>
               <View style={styles.appIconWrapper}>
-                <BookOpen size={20} color="#ffffff" />
+                <Image
+                  source={require('../../assets/memoflow-logo.png')}
+                  style={{ width: 34, height: 34, borderRadius: 10 }}
+                  resizeMode="contain"
+                />
               </View>
               <View>
                 <Text
@@ -163,7 +169,7 @@ export const Drawer: React.FC<DrawerProps> = ({
                     isDark ? styles.textDark : styles.textLight,
                   ]}
                 >
-                  Agenda
+                  MemoFlow
                 </Text>
                 <Text
                   style={[
@@ -171,7 +177,7 @@ export const Drawer: React.FC<DrawerProps> = ({
                     isDark ? styles.subDark : styles.subLight,
                   ]}
                 >
-                  Stockage local sécurisé
+                  Stockage local & Rappels Push
                 </Text>
               </View>
             </View>
@@ -333,6 +339,36 @@ export const Drawer: React.FC<DrawerProps> = ({
               </View>
             </TouchableOpacity>
 
+            {/* Tester les notifications Push */}
+            <TouchableOpacity
+              onPress={async () => {
+                await sendTestNotification();
+                Alert.alert(
+                  'Notification Push Envoyée',
+                  'Une alerte test MemoFlow avec sonnerie et bannière haute priorité a été déclenchée !'
+                );
+              }}
+              style={[
+                styles.actionItem,
+                isDark ? styles.actionItemDark : styles.actionItemLight,
+              ]}
+            >
+              <View style={styles.navItemLeft}>
+                <Bell size={19} color="#2563eb" />
+                <Text
+                  style={[
+                    styles.navItemLabel,
+                    isDark ? styles.textDark : styles.textLight,
+                  ]}
+                >
+                  Tester alertes push
+                </Text>
+              </View>
+              <View style={[styles.amberBadge, { backgroundColor: '#dbeafe' }]}>
+                <Text style={[styles.amberBadgeText, { color: '#1d4ed8' }]}>Tester</Text>
+              </View>
+            </TouchableOpacity>
+
             {/* Privacy Card */}
             <View
               style={[
@@ -471,17 +507,19 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   appIconWrapper: {
-    width: 38,
-    height: 38,
+    width: 40,
+    height: 40,
     borderRadius: 12,
-    backgroundColor: '#f59e0b',
+    backgroundColor: '#ffffff',
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: '#f59e0b',
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.35,
-    shadowRadius: 5,
-    elevation: 4,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
   },
   appName: {
     fontSize: 17,

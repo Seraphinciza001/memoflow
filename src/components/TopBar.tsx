@@ -60,7 +60,7 @@ export const TopBar: React.FC<TopBarProps> = ({
   const getTabTitle = () => {
     switch (activeTab) {
       case 'notes':
-        return 'Agenda';
+        return 'MemoFlow';
       case 'reminders':
         return 'Rappels Temporels';
       case 'archive':
@@ -68,7 +68,7 @@ export const TopBar: React.FC<TopBarProps> = ({
       case 'trash':
         return 'Corbeille';
       default:
-        return 'Agenda';
+        return 'MemoFlow';
     }
   };
 

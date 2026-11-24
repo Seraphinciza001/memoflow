@@ -70,9 +70,9 @@ export function getInitialSeedNotes(): NoteItem[] {
     },
     {
       id: 'note-ideas-2',
-      title: 'Idées de conception Agenda',
+      title: 'Idées de conception MemoFlow',
       type: 'note',
-      content: `Bienvenue dans votre Agenda personnel !\n\nCette application utilise le stockage local pour conserver toutes vos informations et alertes Android en toute sécurité.\n\nFonctionnalités Clés :\n• Listes de tâches interactives avec suivi d'avancement\n• Mode Sombre / Mode Clair soigneusement calibré\n• Alertes d'échéances et rappels 5 min pour tâches urgentes\n• Base de données JSON exportable et importable`,
+      content: `Bienvenue dans votre MemoFlow personnel !\n\nCette application utilise le stockage local pour conserver toutes vos informations et alertes Android en toute sécurité.\n\nFonctionnalités Clés :\n• Listes de tâches interactives avec suivi d'avancement\n• Mode Sombre / Mode Clair soigneusement calibré\n• Notifications push style WhatsApp & Duolingo\n• Base de données JSON exportable et importable`,
       color: 'sand',
       isPinned: true,
       isReadOnly: false,
@@ -185,7 +185,7 @@ export async function saveSettings(settings: Partial<AppSettings>): Promise<void
 export function getFullJsonDatabase(notes: NoteItem[], settings: AppSettings): JsonDatabase {
   return {
     version: 2,
-    appName: 'Agenda Séraphin Native',
+    appName: 'MemoFlow',
     schemaVersion: '2.0.0',
     exportedAt: new Date().toISOString(),
     databaseStats: computeDatabaseStats(notes),
