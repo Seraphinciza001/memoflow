@@ -115,11 +115,13 @@ export function evaluateTaskReminder(task: TaskItem): {
 export function getActiveSmartAlerts(notes: NoteItem[]): SmartAlert[] {
   const alerts: SmartAlert[] = [];
 
+  if (!Array.isArray(notes)) return alerts;
+
   for (const note of notes) {
-    if (note.isDeleted || note.isArchived) continue;
+    if (!note || note.isDeleted || note.isArchived || !Array.isArray(note.tasks)) continue;
 
     for (const task of note.tasks) {
-      if (task.completed || !task.reminderTime) continue;
+      if (!task || task.completed || !task.reminderTime) continue;
 
       const evalRes = evaluateTaskReminder(task);
       if (evalRes.status === 'approaching' || evalRes.status === 'overdue') {

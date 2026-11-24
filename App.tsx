@@ -12,7 +12,6 @@ import {
   TouchableOpacity,
 } from 'react-native';
 import * as Notifications from 'expo-notifications';
-import * as TaskManager from 'expo-task-manager';
 import {
   NoteItem,
   DrawerTab,
@@ -58,17 +57,7 @@ import {
   CheckSquare,
 } from './src/SVG';
 
-// 1. Définition de la tâche d'arrière-plan pour recevoir les notifications même si l'application est fermée
-const BACKGROUND_NOTIFICATION_TASK = 'BACKGROUND_NOTIFICATION_TASK';
-TaskManager.defineTask(BACKGROUND_NOTIFICATION_TASK, async ({ data, error, executionInfo }) => {
-  if (error) {
-    console.error('Erreur tâche de fond notification:', error);
-    return;
-  }
-  console.log('Notification tâche de fond déclenchée:', data, executionInfo);
-});
-
-// 2. Configuration du comportement des notifications au premier plan
+// Configuration du comportement des notifications au premier plan
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
     shouldShowAlert: true,
@@ -121,11 +110,6 @@ export default function App() {
       // Configuration des canaux et permissions notifications MemoFlow
       try {
         await setupNotificationChannels();
-
-        const isRegistered = await TaskManager.isTaskRegisteredAsync(BACKGROUND_NOTIFICATION_TASK);
-        if (!isRegistered) {
-          await Notifications.registerTaskAsync(BACKGROUND_NOTIFICATION_TASK);
-        }
       } catch (err) {
         console.warn('Erreur setup notifications Android:', err);
       }
@@ -138,7 +122,7 @@ export default function App() {
 
         const savedSettings = await loadSettings();
         setSettings(savedSettings);
-        if (savedSettings.theme) setTheme(savedSettings.theme);
+        if (savedSettings?.theme) setTheme(savedSettings.theme);
       } catch (e) {
         console.error('Erreur chargement:', e);
       }

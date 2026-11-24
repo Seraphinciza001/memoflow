@@ -146,7 +146,11 @@ export async function loadNotes(): Promise<NoteItem[]> {
     if (!raw) return getInitialSeedNotes();
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed) || parsed.length === 0) return getInitialSeedNotes();
-    return parsed;
+    return parsed.map((n: any) => ({
+      ...n,
+      tasks: Array.isArray(n.tasks) ? n.tasks : [],
+      images: Array.isArray(n.images) ? n.images : [],
+    }));
   } catch (err) {
     console.error('Erreur chargement notes:', err);
     return getInitialSeedNotes();
