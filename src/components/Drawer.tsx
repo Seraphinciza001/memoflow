@@ -26,7 +26,7 @@ import {
 } from '../SVG';
 import { DrawerTab, NoteItem, ThemeMode, JsonDatabase } from '../types';
 import { getFullJsonDatabase, loadSettings } from '../utils/storage';
-import { sendTestNotification } from '../utils/notifications';
+import { sendTestNotification, sendDelayed10sTestNotification } from '../utils/notifications';
 
 interface DrawerProps {
   isOpen: boolean;
@@ -345,7 +345,7 @@ export const Drawer: React.FC<DrawerProps> = ({
                 await sendTestNotification();
                 Alert.alert(
                   'Notification Push Envoyée',
-                  'Une alerte test MemoFlow avec sonnerie et bannière haute priorité a été déclenchée !'
+                  'Une alerte test MemoFlow immédiate avec sonnerie et bannière haute priorité a été déclenchée !'
                 );
               }}
               style={[
@@ -361,11 +361,41 @@ export const Drawer: React.FC<DrawerProps> = ({
                     isDark ? styles.textDark : styles.textLight,
                   ]}
                 >
-                  Tester alertes push
+                  Tester alerte immédiate
                 </Text>
               </View>
               <View style={[styles.amberBadge, { backgroundColor: '#dbeafe' }]}>
-                <Text style={[styles.amberBadgeText, { color: '#1d4ed8' }]}>Tester</Text>
+                <Text style={[styles.amberBadgeText, { color: '#1d4ed8' }]}>Direct</Text>
+              </View>
+            </TouchableOpacity>
+
+            {/* Tester alerte 10s (Test quand l'app est fermée) */}
+            <TouchableOpacity
+              onPress={async () => {
+                await sendDelayed10sTestNotification();
+                Alert.alert(
+                  '⏰ Alerte programmée dans 10 secondes !',
+                  'Ferme ou minimise maintenant MemoFlow (ou verrouille ton écran) : l\'alerte va sonner et afficher la bannière dans 10s !'
+                );
+              }}
+              style={[
+                styles.actionItem,
+                isDark ? styles.actionItemDark : styles.actionItemLight,
+              ]}
+            >
+              <View style={styles.navItemLeft}>
+                <Clock size={19} color="#10b981" />
+                <Text
+                  style={[
+                    styles.navItemLabel,
+                    isDark ? styles.textDark : styles.textLight,
+                  ]}
+                >
+                  Tester alerte app fermée
+                </Text>
+              </View>
+              <View style={[styles.amberBadge, { backgroundColor: '#d1fae5' }]}>
+                <Text style={[styles.amberBadgeText, { color: '#047857' }]}>Dans 10s</Text>
               </View>
             </TouchableOpacity>
 
@@ -510,11 +540,11 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 12,
-    backgroundColor: '#ffffff',
+    backgroundColor: '#0B192C',
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,
-    borderColor: '#e2e8f0',
+    borderColor: '#1e293b',
     shadowColor: '#000000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,

@@ -19,6 +19,7 @@ export function getTaskReminderDate(reminderTime?: string, dueDate?: string): Da
   if (isNaN(hours) || isNaN(minutes)) return null;
 
   const target = new Date();
+  const now = new Date();
   if (dueDate) {
     const [y, m, d] = dueDate.split('-').map(Number);
     if (!isNaN(y) && !isNaN(m) && !isNaN(d)) {
@@ -27,6 +28,13 @@ export function getTaskReminderDate(reminderTime?: string, dueDate?: string): Da
   }
 
   target.setHours(hours, minutes, 0, 0);
+
+  // If no explicit dueDate was provided and the target time is already in the past today (by more than 60 seconds),
+  // assume it refers to the next day
+  if (!dueDate && target.getTime() < now.getTime() - 60000) {
+    target.setDate(target.getDate() + 1);
+  }
+
   return target;
 }
 
@@ -163,9 +171,24 @@ export function getQuickTimePresets(): Array<{ label: string; time: string; hint
 
   const presets: Array<{ label: string; time: string; hint: string }> = [
     {
+      label: '+5 min',
+      time: addMinutesToTime(5),
+      hint: 'Rappel 5 min',
+    },
+    {
+      label: '+10 min',
+      time: addMinutesToTime(10),
+      hint: 'Rappel 10 min',
+    },
+    {
       label: '+15 min',
       time: addMinutesToTime(15),
-      hint: 'Rappel rapide',
+      hint: 'Rappel 15 min',
+    },
+    {
+      label: '+30 min',
+      time: addMinutesToTime(30),
+      hint: 'Rappel 30 min',
     },
     {
       label: '+1 heure',

@@ -125,11 +125,12 @@ export const NoteEditorModal: React.FC<NoteEditorModalProps> = ({
 
   const handleAddTask = () => {
     if (!newTaskText.trim()) return;
+    const assignedTime = newTaskTime || (newTaskIsUrgent ? addMinutesToTime(5) : undefined);
     const newTask: TaskItem = {
       id: `t-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
       text: newTaskText.trim(),
       completed: false,
-      reminderTime: newTaskTime || undefined,
+      reminderTime: assignedTime,
       isUrgent: newTaskIsUrgent,
       priority: newTaskIsUrgent ? 'high' : newTaskPriority,
     };
@@ -432,7 +433,13 @@ export const NoteEditorModal: React.FC<NoteEditorModalProps> = ({
                     </View>
 
                     <TouchableOpacity
-                      onPress={() => setNewTaskIsUrgent(!newTaskIsUrgent)}
+                      onPress={() => {
+                        const nextUrgent = !newTaskIsUrgent;
+                        setNewTaskIsUrgent(nextUrgent);
+                        if (nextUrgent && !newTaskTime) {
+                          setNewTaskTime(addMinutesToTime(5));
+                        }
+                      }}
                       style={[
                         styles.presetPill,
                         newTaskIsUrgent ? styles.urgentPillActive : null,

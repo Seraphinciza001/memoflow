@@ -2,24 +2,24 @@
   "expo": {
     "name": "MemoFlow",
     "slug": "agenda-seraphin",
-    "version": "2.0.0",
+    "version": "2.0.1",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "automatic",
     "splash": {
       "image": "./assets/splash.png",
       "resizeMode": "contain",
-      "backgroundColor": "#ffffff"
+      "backgroundColor": "#0B192C"
     },
     "ios": {
       "supportsTablet": true
     },
     "android": {
       "package": "com.seraphin.agenda",
-      "versionCode": 2,
+      "versionCode": 3,
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#ffffff"
+        "backgroundColor": "#0B192C"
       },
       "permissions": [
         "RECEIVE_BOOT_COMPLETED",
@@ -35,7 +35,7 @@
         "expo-notifications",
         {
           "icon": "./assets/notification-icon.png",
-          "color": "#d97706",
+          "color": "#0B192C",
           "sounds": []
         }
       ],
