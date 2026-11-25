@@ -1,6 +1,29 @@
 import { TaskItem, SmartAlert, NoteItem } from '../types';
 
 /**
+ * Safe French time formatter (HH:mm) - 100% pure JS, zero Intl/Hermes crash risk
+ */
+export function formatHHMM(date: Date): string {
+  const h = String(date.getHours()).padStart(2, '0');
+  const m = String(date.getMinutes()).padStart(2, '0');
+  return `${h}:${m}`;
+}
+
+const MONTHS_FR = [
+  'janv.', 'févr.', 'mars', 'avr.', 'mai', 'juin',
+  'juil.', 'août', 'sept.', 'oct.', 'nov.', 'déc.'
+];
+
+/**
+ * Safe French short date formatter (e.g. "25 nov.") - 100% pure JS
+ */
+export function formatDateShort(date: Date): string {
+  const day = date.getDate();
+  const month = MONTHS_FR[date.getMonth()] || '';
+  return `${day} ${month}`;
+}
+
+/**
  * Parses time string (either "HH:mm" or "YYYY-MM-DDTHH:mm") relative to current time
  */
 export function getTaskReminderDate(reminderTime?: string, dueDate?: string): Date | null {
@@ -78,7 +101,7 @@ export function evaluateTaskReminder(task: TaskItem): {
   formattedTarget: string;
   relativeLabel: string;
 } {
-  if (!task.reminderTime || task.completed) {
+  if (!task || !task.reminderTime || task.completed) {
     return { status: 'normal', diffMinutes: 0, formattedTarget: '', relativeLabel: '' };
   }
 
@@ -91,10 +114,7 @@ export function evaluateTaskReminder(task: TaskItem): {
   const diffMs = targetDate.getTime() - now.getTime();
   const diffMinutes = Math.round(diffMs / (1000 * 60));
 
-  const timeString = targetDate.toLocaleTimeString('fr-FR', {
-    hour: '2-digit',
-    minute: '2-digit',
-  });
+  const timeString = formatHHMM(targetDate);
 
   const relativeLabel = formatRelativeMinutes(diffMinutes, timeString);
 

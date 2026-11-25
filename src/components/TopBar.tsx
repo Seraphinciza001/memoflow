@@ -45,12 +45,9 @@ export const TopBar: React.FC<TopBarProps> = ({
   useEffect(() => {
     const updateTime = () => {
       const now = new Date();
-      setCurrentTime(
-        now.toLocaleTimeString('fr-FR', {
-          hour: '2-digit',
-          minute: '2-digit',
-        })
-      );
+      const h = String(now.getHours()).padStart(2, '0');
+      const m = String(now.getMinutes()).padStart(2, '0');
+      setCurrentTime(`${h}:${m}`);
     };
     updateTime();
     const interval = setInterval(updateTime, 1000);

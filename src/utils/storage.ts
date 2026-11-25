@@ -146,11 +146,30 @@ export async function loadNotes(): Promise<NoteItem[]> {
     if (!raw) return getInitialSeedNotes();
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed) || parsed.length === 0) return getInitialSeedNotes();
-    return parsed.map((n: any) => ({
-      ...n,
-      tasks: Array.isArray(n.tasks) ? n.tasks : [],
-      images: Array.isArray(n.images) ? n.images : [],
-    }));
+    return parsed
+      .filter((n: any) => n && typeof n === 'object')
+      .map((n: any) => ({
+        ...n,
+        id: String(n.id || `note-${Date.now()}-${Math.random()}`),
+        title: String(n.title || ''),
+        content: String(n.content || ''),
+        type: n.type === 'list' ? 'list' : 'note',
+        tasks: Array.isArray(n.tasks)
+          ? n.tasks
+              .filter((t: any) => t && typeof t === 'object')
+              .map((t: any) => ({
+                ...t,
+                id: String(t.id || `t-${Date.now()}-${Math.random()}`),
+                text: String(t.text || ''),
+                completed: Boolean(t.completed),
+                reminderTime: typeof t.reminderTime === 'string' ? t.reminderTime : undefined,
+                dueDate: typeof t.dueDate === 'string' ? t.dueDate : undefined,
+              }))
+          : [],
+        images: Array.isArray(n.images) ? n.images : [],
+        updatedAt: typeof n.updatedAt === 'number' ? n.updatedAt : Date.now(),
+        createdAt: typeof n.createdAt === 'number' ? n.createdAt : Date.now(),
+      }));
   } catch (err) {
     console.error('Erreur chargement notes:', err);
     return getInitialSeedNotes();

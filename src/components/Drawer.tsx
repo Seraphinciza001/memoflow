@@ -23,6 +23,7 @@ import {
   Database,
   Sun,
   Moon,
+  Clock,
 } from '../SVG';
 import { DrawerTab, NoteItem, ThemeMode, JsonDatabase } from '../types';
 import { getFullJsonDatabase, loadSettings } from '../utils/storage';

@@ -21,7 +21,7 @@ import {
   CheckSquare,
 } from '../SVG';
 import { NoteItem, NoteColor, TaskItem } from '../types';
-import { evaluateTaskReminder } from '../utils/time';
+import { evaluateTaskReminder, formatDateShort } from '../utils/time';
 
 interface NoteCardProps {
   note: NoteItem;
@@ -452,10 +452,7 @@ export const NoteCard: React.FC<NoteCardProps> = ({
       {/* Card Footer Actions */}
       <View style={[styles.cardFooter, isDark ? styles.footerDark : styles.footerLight]}>
         <Text style={[styles.dateText, isDark ? styles.subDark : styles.subLight]}>
-          {new Date(note.updatedAt).toLocaleDateString('fr-FR', {
-            day: 'numeric',
-            month: 'short',
-          })}
+          {formatDateShort(new Date(note.updatedAt || Date.now()))}
         </Text>
 
         {isTrashView ? (

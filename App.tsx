@@ -30,6 +30,7 @@ import {
 import {
   getActiveSmartAlerts,
   addMinutesToTime,
+  formatHHMM,
 } from './src/utils/time';
 import {
   setupNotificationChannels,
@@ -66,7 +67,64 @@ Notifications.setNotificationHandler({
   }),
 });
 
-export default function App() {
+// Global error safeguard for Android release builds: prevent native process death
+if (typeof (global as any).ErrorUtils !== 'undefined') {
+  try {
+    (global as any).ErrorUtils.setGlobalHandler((error: any, isFatal?: boolean) => {
+      console.warn('MemoFlow caught global error (isFatal=' + isFatal + '):', error);
+    });
+  } catch (e) {
+    console.warn('Error configuring global handler:', e);
+  }
+}
+
+interface RootErrorBoundaryProps {
+  children: React.ReactNode;
+}
+
+interface RootErrorBoundaryState {
+  hasError: boolean;
+  error: Error | null;
+}
+
+class RootErrorBoundary extends React.Component<RootErrorBoundaryProps, RootErrorBoundaryState> {
+  constructor(props: RootErrorBoundaryProps) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+
+  static getDerivedStateFromError(error: Error) {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error: Error, errorInfo: any) {
+    console.warn('RootErrorBoundary caught error:', error, errorInfo);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <SafeAreaView style={{ flex: 1, backgroundColor: '#0B192C', justifyContent: 'center', alignItems: 'center', padding: 24 }}>
+          <Text style={{ fontSize: 26, fontWeight: 'bold', color: '#ffffff', marginBottom: 12 }}>
+            MemoFlow
+          </Text>
+          <Text style={{ fontSize: 15, color: '#94a3b8', textAlign: 'center', marginBottom: 28, lineHeight: 22 }}>
+            Une anomalie temporaire a été contenue en toute sécurité. Vos données et rappels sont préservés.
+          </Text>
+          <TouchableOpacity
+            onPress={() => this.setState({ hasError: false, error: null })}
+            style={{ backgroundColor: '#2563eb', paddingVertical: 14, paddingHorizontal: 28, borderRadius: 12, marginBottom: 14 }}
+          >
+            <Text style={{ color: '#ffffff', fontWeight: 'bold', fontSize: 16 }}>Relancer MemoFlow</Text>
+          </TouchableOpacity>
+        </SafeAreaView>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+function MemoFlowMain() {
   const systemColorScheme = useColorScheme();
   const [notes, setNotes] = useState<NoteItem[]>([]);
   const [settings, setSettings] = useState<AppSettings>({
@@ -262,10 +320,7 @@ export default function App() {
       if (n.id !== noteId) return n;
       const nextTasks = (n.tasks || []).map((t) => {
         if (t.id === taskId) {
-          const nowTime = new Date().toLocaleTimeString('fr-FR', {
-            hour: '2-digit',
-            minute: '2-digit',
-          });
+          const nowTime = formatHHMM(new Date());
           const baseTime = t.reminderTime || nowTime;
           const newTime = addMinutesToTime(minutes, baseTime);
           return {
@@ -792,6 +847,14 @@ export default function App() {
         isDark={isDark}
       />
     </SafeAreaView>
+  );
+}
+
+export default function App() {
+  return (
+    <RootErrorBoundary>
+      <MemoFlowMain />
+    </RootErrorBoundary>
   );
 }
 
